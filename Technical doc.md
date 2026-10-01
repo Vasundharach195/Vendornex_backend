@@ -91,8 +91,8 @@ Features and their main classes:
 | Purchase requests | `PurchaseRequestController` | `PurchaseRequestService` | `PurchaseRequestRepository`, `PurchaseRequestQueries` / `PurchaseRequest`, `PurchaseRequestLine` |
 | RFQs | `RfqController` | — (logic still in controller) | — |
 | POs, ASNs, GRPOs | `PurchaseOrderController` | `PoStatus` (rest still in controller) | — |
-| Scorecard, dashboards | `ScorecardController`, `DashboardController` | — (logic still in controller) | — |
-| Login | `AuthController` | `AuthService` | — |
+| Scorecard, dashboards | `ScorecardController`, `DashboardController` | — (logic in controller) | `ScorecardQueries`, `DashboardQueries` |
+| Login | `AuthController` | `AuthService` | `AuthQueries` |
 
 Resources:
 

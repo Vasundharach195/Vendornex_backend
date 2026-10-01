@@ -36,16 +36,18 @@ public class StartupConfig {
     private static final Logger log = LoggerFactory.getLogger(StartupConfig.class);
 
     private final DataSource dataSource;
+    private final com.ikyam.vendornex.repository.AuthQueries authQueries;
 
-    public StartupConfig(DataSource dataSource) {
+    public StartupConfig(DataSource dataSource, com.ikyam.vendornex.repository.AuthQueries authQueries) {
         this.dataSource = dataSource;
+        this.authQueries = authQueries;
     }
 
     @PostConstruct
     public void start() throws Exception {
         AppConfig cfg = AppConfig.get();
         Crypto.init(cfg);
-        AuthService.init(cfg);
+        AuthService.init(cfg, authQueries);
 
         Db.init(cfg);
         Db.bindSpringDataSource(dataSource);

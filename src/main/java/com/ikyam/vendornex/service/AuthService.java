@@ -1,9 +1,9 @@
 package com.ikyam.vendornex.service;
 
 import com.ikyam.vendornex.config.AppConfig;
-import com.ikyam.vendornex.db.Db;
 import com.ikyam.vendornex.db.Row;
 import com.ikyam.vendornex.http.ApiException;
+import com.ikyam.vendornex.repository.AuthQueries;
 import com.ikyam.vendornex.security.Crypto;
 import com.ikyam.vendornex.security.CurrentUser;
 import com.ikyam.vendornex.security.Jwt;
@@ -19,11 +19,23 @@ import java.util.UUID;
 public final class AuthService {
 
     private static Jwt jwt;
+    private static AuthQueries queries;
 
     private AuthService() {}
 
+    public static void setQueries(AuthQueries authQueries) {
+        queries = authQueries;
+    }
+
     public static void init(AppConfig cfg) {
         jwt = new Jwt(cfg.jwtSecret, cfg.jwtTtlMinutes);
+    }
+
+    public static void init(AppConfig cfg, AuthQueries authQueries) {
+        init(cfg);
+        if (authQueries != null) {
+            queries = authQueries;
+        }
     }
 
     public static String issueToken(UUID userId) {
@@ -41,14 +53,7 @@ public final class AuthService {
             throw ApiException.unauthorized("Invalid session token");
         }
         // Re-read the user on every request so disabling a user / company takes effect immediately.
-        Row u = Db.one("""
-                SELECT u.id, u.company_id, u.role, u.vendor_id, u.name, u.email, u.status,
-                       c.is_active AS company_active, v.status AS vendor_status,
-                       ARRAY(SELECT s.stage FROM user_approval_stages s WHERE s.user_id = u.id) AS stages
-                  FROM users u
-                  LEFT JOIN companies c ON c.id = u.company_id
-                  LEFT JOIN vendors v ON v.id = u.vendor_id
-                 WHERE u.id = ?""", userId);
+        Row u = queries.findUserForAuth(userId);
         if (u == null || !"ACTIVE".equals(u.str("status"))) throw ApiException.unauthorized("Account is not active");
         if (u.get("companyId") != null && !u.bool("companyActive")) throw ApiException.unauthorized("Company account is inactive");
         if (u.get("vendorId") != null && !"ACTIVE".equals(u.str("vendorStatus"))) throw ApiException.unauthorized("Vendor account is not active");
@@ -58,17 +63,7 @@ public final class AuthService {
 
     /** Everything the frontend needs to build the shell for this user. */
     public static Row profile(UUID userId) {
-        Row p = Db.one("""
-                SELECT u.id, u.name, u.email, u.role, u.department, u.company_id, u.vendor_id,
-                       c.name AS company_name, c.integration_mode, c.connection_status,
-                       v.legal_name AS vendor_name, v.sap_card_code AS vendor_card_code,
-                       s.pr_mode,
-                       ARRAY(SELECT st.stage FROM user_approval_stages st WHERE st.user_id = u.id ORDER BY st.stage) AS stages
-                  FROM users u
-                  LEFT JOIN companies c ON c.id = u.company_id
-                  LEFT JOIN company_settings s ON s.company_id = u.company_id
-                  LEFT JOIN vendors v ON v.id = u.vendor_id
-                 WHERE u.id = ?""", userId);
+        Row p = queries.findUserProfile(userId);
         if (p == null) throw ApiException.notFound("User");
         return p;
     }
@@ -81,8 +76,7 @@ public final class AuthService {
      */
     public static String issueInvite(UUID userId) {
         String token = Crypto.randomToken();
-        Db.exec("UPDATE users SET invite_token = ?, invite_expires_at = ?, status = 'INVITED', updated_at = now() WHERE id = ?",
-                token, java.sql.Timestamp.from(Instant.now().plus(7, ChronoUnit.DAYS)), userId);
+        queries.updateInviteToken(userId, token, java.sql.Timestamp.from(Instant.now().plus(7, ChronoUnit.DAYS)));
         return inviteLink(token);
     }
 
@@ -92,8 +86,7 @@ public final class AuthService {
 
     public static void logActivity(UUID userId, UUID companyId, String email, String event, HttpServletRequest req) {
         String ua = req.getHeader("User-Agent");
-        Db.exec("INSERT INTO login_activity(user_id, company_id, email, event, ip_address, user_agent) VALUES (?,?,?,?,?,?)",
-                userId, companyId, email, event, clientIp(req), ua == null ? null : ua.substring(0, Math.min(ua.length(), 400)));
+        queries.insertLoginActivity(userId, companyId, email, event, clientIp(req), ua == null ? null : ua.substring(0, Math.min(ua.length(), 400)));
     }
 
     private static String clientIp(HttpServletRequest req) {
