@@ -1,5 +1,6 @@
 package com.ikyam.vendornex.common;
 
+import com.ikyam.vendornex.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,9 +15,10 @@ public final class Background {
     private Background() {}
 
     public static void run(String name, Runnable r) {
+        String schema = TenantContext.get(); // the task keeps working for the company that started it
         EXEC.submit(() -> {
             try {
-                r.run();
+                TenantContext.run(schema, r);
             } catch (Exception e) {
                 log.error("Background task {} failed", name, e);
             }

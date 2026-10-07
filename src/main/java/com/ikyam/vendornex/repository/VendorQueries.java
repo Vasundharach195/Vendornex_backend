@@ -64,17 +64,37 @@ public class VendorQueries {
                        String zipCode, String country, String gstin, String pan, String bankName, String bankAccountNo,
                        String bankIfsc, String sapBankCode, Integer wizardStep) {
         String sql = """
-                UPDATE vendors SET legal_name = COALESCE(?, legal_name), contact_name = ?, email = ?, phone = ?, link_type = ?,
-                       sap_card_code = ?, sap_bp_status = CASE WHEN ?::text IS NULL THEN NULL
+                UPDATE vendors SET legal_name = COALESCE(:legalName, legal_name), contact_name = :contactName, email = :email, phone = :phone, link_type = :linkType,
+                       sap_card_code = :sapCardCode, sap_bp_status = CASE WHEN :sapCardCode::text IS NULL THEN NULL
                            ELSE (SELECT CASE WHEN is_active THEN 'ACTIVE' ELSE 'INACTIVE' END FROM sap_business_partners b
-                                  WHERE b.company_id = vendors.company_id AND b.card_code = ?) END,
-                       vendor_group_code = ?, vendor_group_name = ?, street = ?, city = ?, state = ?, zip_code = ?, country = ?,
-                       gstin = ?, pan = ?, bank_name = ?, bank_account_no = ?, bank_ifsc = ?, sap_bank_code = ?,
-                       wizard_step = COALESCE(?, wizard_step), updated_at = now()
-                 WHERE id = ?""";
-        Object[] params = {legalName, contactName, email, phone, linkType, sapCardCode, sapCardCode, groupCode, groupName,
-                street, city, state, zipCode, country, gstin, pan, bankName, bankAccountNo, bankIfsc, sapBankCode, wizardStep, id};
-        jdbc.update(sql, ps -> SqlBind.bind(ps.getConnection(), ps, params));
+                                  WHERE b.company_id = vendors.company_id AND b.card_code = :sapCardCode) END,
+                       vendor_group_code = :groupCode, vendor_group_name = :groupName, street = :street, city = :city, state = :state, zip_code = :zipCode, country = :country,
+                       gstin = :gstin, pan = :pan, bank_name = :bankName, bank_account_no = :bankAccountNo, bank_ifsc = :bankIfsc, sap_bank_code = :sapBankCode,
+                       wizard_step = COALESCE(:wizardStep, wizard_step), updated_at = now()
+                 WHERE id = :id""";
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("legalName", legalName)
+                .addValue("contactName", contactName)
+                .addValue("email", email)
+                .addValue("phone", phone)
+                .addValue("linkType", linkType)
+                .addValue("sapCardCode", sapCardCode)
+                .addValue("groupCode", groupCode)
+                .addValue("groupName", groupName)
+                .addValue("street", street)
+                .addValue("city", city)
+                .addValue("state", state)
+                .addValue("zipCode", zipCode)
+                .addValue("country", country)
+                .addValue("gstin", gstin)
+                .addValue("pan", pan)
+                .addValue("bankName", bankName)
+                .addValue("bankAccountNo", bankAccountNo)
+                .addValue("bankIfsc", bankIfsc)
+                .addValue("sapBankCode", sapBankCode)
+                .addValue("wizardStep", wizardStep);
+        namedJdbc.update(sql, params);
     }
 
     public void updateStatusPendingApproval(UUID id) {
@@ -132,7 +152,7 @@ public class VendorQueries {
     }
 
     public Row userByEmail(String email) {
-        List<Row> rows = namedJdbc.query("SELECT role, vendor_id FROM users WHERE lower(email) = lower(:email)",
+        List<Row> rows = namedJdbc.query("SELECT role, vendor_id FROM global_users WHERE lower(email) = lower(:email)",
                 new MapSqlParameterSource("email", email), GenericRowMapper.INSTANCE);
         return rows.isEmpty() ? null : rows.get(0);
     }

@@ -32,8 +32,9 @@ public final class Migrator {
         try (Connection c = DriverManager.getConnection(cfg.migrationDbUrl, cfg.dbUser, cfg.dbPassword)) {
             try (Statement st = c.createStatement()) {
                 st.execute("SELECT pg_advisory_lock(8675309)");
+                st.execute("CREATE SCHEMA IF NOT EXISTS ik_vendor");
                 st.execute("""
-                        CREATE TABLE IF NOT EXISTS schema_migrations (
+                        CREATE TABLE IF NOT EXISTS ik_vendor.schema_migrations (
                             version     VARCHAR(100) PRIMARY KEY,
                             checksum    VARCHAR(64) NOT NULL,
                             applied_at  TIMESTAMPTZ NOT NULL DEFAULT now())""");
@@ -43,7 +44,7 @@ public final class Migrator {
                     String sql = load(file);
                     String sum = sha256(sql);
                     String existing = null;
-                    try (PreparedStatement ps = c.prepareStatement("SELECT checksum FROM schema_migrations WHERE version = ?")) {
+                    try (PreparedStatement ps = c.prepareStatement("SELECT checksum FROM ik_vendor.schema_migrations WHERE version = ?")) {
                         ps.setString(1, file);
                         try (ResultSet rs = ps.executeQuery()) {
                             if (rs.next()) existing = rs.getString(1);
@@ -59,7 +60,7 @@ public final class Migrator {
                     c.setAutoCommit(false);
                     try (Statement st = c.createStatement()) {
                         st.execute(sql);
-                        try (PreparedStatement ps = c.prepareStatement("INSERT INTO schema_migrations(version, checksum) VALUES (?, ?)")) {
+                        try (PreparedStatement ps = c.prepareStatement("INSERT INTO ik_vendor.schema_migrations(version, checksum) VALUES (?, ?)")) {
                             ps.setString(1, file);
                             ps.setString(2, sum);
                             ps.executeUpdate();

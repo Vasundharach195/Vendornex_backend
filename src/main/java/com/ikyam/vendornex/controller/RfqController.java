@@ -11,6 +11,7 @@ import com.ikyam.vendornex.security.CurrentUser;
 import com.ikyam.vendornex.security.Role;
 import com.ikyam.vendornex.service.PurchaseRequestService;
 import com.ikyam.vendornex.service.SyncService;
+import com.ikyam.vendornex.tenant.Tenants;
 import com.ikyam.vendornex.web.Ids;
 import com.ikyam.vendornex.web.QueryParams;
 import com.ikyam.vendornex.web.Roles;
@@ -365,7 +366,11 @@ public class RfqController {
 
     /** Scheduler: OPEN RFQs past their due date stop accepting quotes. */
     public static int closeOverdue() {
-        return Db.exec("UPDATE rfqs SET status = 'CLOSED', updated_at = now() WHERE status = 'OPEN' AND due_date < CURRENT_DATE");
+        // rfqs is a per-company table: close overdue RFQs in each company's schema.
+        int[] total = {0};
+        Tenants.forEach(companyId -> total[0] +=
+                Db.exec("UPDATE rfqs SET status = 'CLOSED', updated_at = now() WHERE status = 'OPEN' AND due_date < CURRENT_DATE"));
+        return total[0];
     }
 
     // =================================================================== vendor side

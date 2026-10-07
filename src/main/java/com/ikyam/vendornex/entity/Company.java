@@ -59,6 +59,10 @@ public class Company {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
+    /** Postgres schema holding this company's tables (vnx_c00001, ...). Set once at onboarding. */
+    @Column(name = "schema_id", length = 30, updatable = false)
+    private String schemaId;
+
     @Column(name = "onboarded_on", nullable = false)
     private LocalDate onboardedOn = LocalDate.now();
 
@@ -113,6 +117,9 @@ public class Company {
 
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
+
+    public String getSchemaId() { return schemaId; }
+    public void setSchemaId(String schemaId) { this.schemaId = schemaId; }
 
     public LocalDate getOnboardedOn() { return onboardedOn; }
 

@@ -21,7 +21,10 @@ public final class AppConfig {
     public final String secretKeyB64;
     public final String documentStoreDir;
     public final String publicAppUrl;
+    /** Creates the Super Admin login when none exists. */
     public final boolean seedDemo;
+    /** Also loads the demo companies and their data. Off by default: companies come from onboarding. */
+    public final boolean seedDemoCompanies;
     public final boolean schedulerEnabled;
     public final String corsOrigin;
 
@@ -31,13 +34,14 @@ public final class AppConfig {
         dbUser = env("DB_USER", "vendornex");
         dbPassword = env("DB_PASSWORD", "vendornex");
         dbPoolSize = Integer.parseInt(env("DB_POOL_SIZE", "20"));
-        httpPort = Integer.parseInt(env("HTTP_PORT", "8080"));
+        httpPort = Integer.parseInt(env("HTTP_PORT", "8092"));
         jwtSecret = env("JWT_SECRET", "dev-only-change-me-dev-only-change-me-0123456789");
         jwtTtlMinutes = Integer.parseInt(env("JWT_TTL_MINUTES", "480"));
         secretKeyB64 = env("APP_SECRET_KEY", "");
         documentStoreDir = env("DOCUMENT_STORE_DIR", "./data/documents");
         publicAppUrl = env("PUBLIC_APP_URL", "http://localhost:5173");
         seedDemo = Boolean.parseBoolean(env("SEED_DEMO", "true"));
+        seedDemoCompanies = Boolean.parseBoolean(env("SEED_DEMO_COMPANIES", "false"));
         schedulerEnabled = Boolean.parseBoolean(env("SCHEDULER_ENABLED", "true"));
         corsOrigin = env("CORS_ORIGIN", "*");
     }

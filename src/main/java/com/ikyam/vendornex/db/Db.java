@@ -3,6 +3,7 @@ package com.ikyam.vendornex.db;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ikyam.vendornex.config.AppConfig;
 import com.ikyam.vendornex.http.Json;
+import com.ikyam.vendornex.tenant.TenantRoutingDataSource;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.postgresql.util.PGobject;
@@ -32,7 +33,9 @@ import java.util.UUID;
  */
 public final class Db {
 
-    private static HikariDataSource ds;
+    private static HikariDataSource pool;
+    /** {@link #pool} wrapped so every statement runs in the current company's schema. */
+    private static DataSource ds;
     private static final ThreadLocal<Connection> TX = new ThreadLocal<>();
     /** Spring-managed DataSource (JPA/JdbcTemplate). Set at startup; see {@link #bindSpringDataSource}. */
     private static DataSource springDs;
@@ -68,11 +71,12 @@ public final class Db {
         hc.setIdleTimeout(5 * 60_000L);
         hc.addDataSourceProperty("prepareThreshold", "0");
         hc.addDataSourceProperty("ApplicationName", "vendornex-api");
-        ds = new HikariDataSource(hc);
+        pool = new HikariDataSource(hc);
+        ds = new TenantRoutingDataSource(pool);
     }
 
     public static void close() {
-        if (ds != null) ds.close();
+        if (pool != null) pool.close();
     }
 
     // ------------------------------------------------------------------ transactions
@@ -158,6 +162,16 @@ public final class Db {
                 bind(c, ps, params);
                 return ps.executeUpdate();
             }
+        });
+    }
+
+    /** Runs a multi-statement SQL script (DDL) with no parameters. */
+    public static void script(String sql) {
+        withConn(c -> {
+            try (Statement st = c.createStatement()) {
+                st.execute(sql);
+            }
+            return null;
         });
     }
 

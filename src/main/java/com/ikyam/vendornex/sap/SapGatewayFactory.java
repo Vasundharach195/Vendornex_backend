@@ -41,6 +41,7 @@ public final class SapGatewayFactory {
         Entry e = CACHE.get(companyId);
         if (e != null && e.fingerprint().equals(fp)) return e.gateway();
         SapB1Gateway g = create(conn, companyId.toString());
+        if (g instanceof ServiceLayerGateway sl) sl.trackSession(companyId, c.str("schemaId"));
         CACHE.put(companyId, new Entry(fp, g));
         return g;
     }
@@ -50,7 +51,8 @@ public final class SapGatewayFactory {
         if ("MOCK".equals(c.mode())) {
             if (mock == null) throw ApiException.badRequest("The Service Layer simulator is not running on this server");
             String db = c.companyDb() == null || c.companyDb().isBlank() ? "MOCK_" + tenantKey.substring(0, 8) : c.companyDb();
-            return new ServiceLayerGateway("http://127.0.0.1:" + mock.port(), db, MockServiceLayer.USER, MockServiceLayer.PASSWORD, true);
+            // The simulator only serves /b1s/v1, whatever version real companies default to.
+            return new ServiceLayerGateway("http://127.0.0.1:" + mock.port() + "/b1s/v1", db, MockServiceLayer.USER, MockServiceLayer.PASSWORD, true);
         }
         return new ServiceLayerGateway(c.baseUrl(), c.companyDb(), c.user(), c.password(), c.verifyTls());
     }

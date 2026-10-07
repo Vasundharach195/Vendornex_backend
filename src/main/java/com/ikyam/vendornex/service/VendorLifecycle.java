@@ -36,7 +36,7 @@ public final class VendorLifecycle {
     public static void onActivated(UUID vendorId) {
         Row v = Db.one("SELECT id, company_id, legal_name, contact_name, email FROM vendors WHERE id = ?", vendorId);
         if (v.str("email") == null) return;
-        Row existing = Db.one("SELECT id, vendor_id, status FROM users WHERE lower(email) = lower(?)", v.str("email"));
+        Row existing = Db.one("SELECT id, vendor_id, status FROM global_users WHERE lower(email) = lower(?)", v.str("email"));
         if (existing != null) {
             if (!vendorId.equals(existing.uuid("vendorId"))) {
                 log.warn("Vendor {} activated but e-mail {} already belongs to another user — no portal login created", vendorId, v.str("email"));

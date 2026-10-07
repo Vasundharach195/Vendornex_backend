@@ -41,7 +41,10 @@ public class CompanyController {
     @Roles(Role.SUPER_ADMIN)
     public Object create(@RequestBody CreateCompanyRequest req) {
         UUID id = service.create(req);
-        return service.afterCreate(id);
+        
+        
+       return service.afterCreate(id);
+		//return id;
     }
 
     @PutMapping("/api/sa/companies/{id}")

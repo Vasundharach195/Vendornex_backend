@@ -8,11 +8,14 @@ import com.ikyam.vendornex.security.Crypto;
 import com.ikyam.vendornex.security.CurrentUser;
 import com.ikyam.vendornex.security.Jwt;
 import com.ikyam.vendornex.security.Role;
+import com.ikyam.vendornex.tenant.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.UUID;
 
 /** Session validation, profile lookup, and invitation issuing — reused across controllers. */
@@ -20,6 +23,7 @@ public final class AuthService {
 
     private static Jwt jwt;
     private static AuthQueries queries;
+    private static int jwtTtlMinutes;
 
     private AuthService() {}
 
@@ -29,6 +33,7 @@ public final class AuthService {
 
     public static void init(AppConfig cfg) {
         jwt = new Jwt(cfg.jwtSecret, cfg.jwtTtlMinutes);
+        jwtTtlMinutes = cfg.jwtTtlMinutes;
     }
 
     public static void init(AppConfig cfg, AuthQueries authQueries) {
@@ -39,7 +44,27 @@ public final class AuthService {
     }
 
     public static String issueToken(UUID userId) {
-        return jwt.issue(userId.toString());
+        String token = jwt.issue(userId.toString());
+        try {
+            Row target = queries.findTokenTarget(userId);
+            String schema = target == null ? null : target.str("schemaId");
+            String role = target == null ? null : target.str("role");
+            String hash = sha256(token);
+            java.sql.Timestamp expires = java.sql.Timestamp.from(Instant.now().plus(jwtTtlMinutes, ChronoUnit.MINUTES));
+            TenantContext.run(schema, () -> queries.insertJwtRecord(userId, role, hash, expires));
+        } catch (Exception e) {
+            // audit-only bookkeeping — never block login over it
+        }
+        return token;
+    }
+
+    private static String sha256(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     // ---------------------------------------------------------------- per-request authentication
@@ -57,6 +82,8 @@ public final class AuthService {
         if (u == null || !"ACTIVE".equals(u.str("status"))) throw ApiException.unauthorized("Account is not active");
         if (u.get("companyId") != null && !u.bool("companyActive")) throw ApiException.unauthorized("Company account is inactive");
         if (u.get("vendorId") != null && !"ACTIVE".equals(u.str("vendorStatus"))) throw ApiException.unauthorized("Vendor account is not active");
+        // The rest of this request runs in the caller's company schema (TenantContextFilter clears it).
+        TenantContext.set(u.str("schemaId"));
         return new CurrentUser(u.uuid("id"), u.uuid("companyId"), Role.valueOf(u.str("role")), u.uuid("vendorId"),
                 new HashSet<>(u.strList("stages")), u.str("name"), u.str("email"));
     }

@@ -1,5 +1,6 @@
 package com.ikyam.vendornex.seed;
 
+import com.ikyam.vendornex.config.AppConfig;
 import com.ikyam.vendornex.db.Db;
 import com.ikyam.vendornex.db.Row;
 import com.ikyam.vendornex.security.Crypto;
@@ -8,6 +9,8 @@ import com.ikyam.vendornex.service.DocumentStore;
 import com.ikyam.vendornex.service.MasterSyncService;
 import com.ikyam.vendornex.service.PoStatus;
 import com.ikyam.vendornex.service.SyncService;
+import com.ikyam.vendornex.tenant.TenantContext;
+import com.ikyam.vendornex.tenant.Tenants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,7 +20,8 @@ import java.time.LocalDate;
 import java.util.*;
 
 /**
- * Loads the wireframe's demo data into an empty database. B1 documents (POs, GRPO drafts, GRPOs) are
+ * Creates the Super Admin login in an empty database and, only when SEED_DEMO_COMPANIES=true, the
+ * wireframe's demo companies (each in its own tenant schema). B1 documents (POs, GRPO drafts, GRPOs) are
  * created through the real sync outbox against the Service Layer simulator, so every seeded PO has a
  * genuine B1 DocEntry/DocNum and later actions (ASN, GRPO) work end to end.
  */
@@ -28,15 +32,27 @@ public final class DemoSeeder {
     private DemoSeeder() {}
 
     public static void seedIfEmpty() {
+        // The Super Admin is the only login that exists before any company is onboarded.
+        if (Db.scalar("SELECT count(*) FROM global_users WHERE role = 'SUPER_ADMIN'", Long.class) == 0) {
+            log.info("No Super Admin yet — creating superadmin@ikyam.com");
+            Db.exec("INSERT INTO global_users(name, email, role, status, password_hash) VALUES ('Product Admin', 'superadmin@ikyam.com', 'SUPER_ADMIN', 'ACTIVE', ?)",
+                    Passwords.hash("Ikyam@2026"));
+        }
+
+        // Companies are normally created through onboarding; the demo companies are opt-in (SEED_DEMO_COMPANIES=true).
+        if (!AppConfig.get().seedDemoCompanies) return;
         if (Db.scalar("SELECT count(*) FROM companies", Long.class) > 0) return;
-        log.info("Empty database — loading demo data");
-        String superHash = Passwords.hash("Ikyam@2026");
-        Db.exec("INSERT INTO users(name, email, role, status, password_hash) VALUES ('Product Admin', 'superadmin@ikyam.com', 'SUPER_ADMIN', 'ACTIVE', ?)", superHash);
+        log.info("No companies yet — loading demo companies");
 
         UUID acme = company("Acme Precision Works", "Manufacturing", "ACME_LIVE", LocalDate.now().minusMonths(6));
         company("Dhash Fabrication Pvt Ltd", "Fabrication", "DHASH_LIVE", LocalDate.now().minusMonths(4));
         company("Ikyam Solutions Pvt Ltd", "Technology", "IKYAM_TEST", LocalDate.now().minusMonths(8));
 
+        Tenants.run(acme, () -> seedAcme(acme));
+        log.info("Demo data loaded");
+    }
+
+    private static void seedAcme(UUID acme) {
         Db.exec("""
                 UPDATE company_settings SET default_warehouse_code = 'WH-01', default_tax_code = 'GST18'
                  WHERE company_id = ?""", acme);
@@ -146,27 +162,30 @@ public final class DemoSeeder {
         ack(po3);
         po(acme, adminId, v.get("v5"), "V-10031", "DIRECT", null, 12, new Object[]{"ITM-1050", "Ball Bearing 6205ZZ", "EA", 800, 95, "WH-01"});
         po(acme, adminId, v.get("v2"), "V-10024", "DIRECT", null, 14, new Object[]{"ITM-1002", "Aluminium Sheet 2mm", "SHT", 150, 1120, "WH-01"});
-        log.info("Demo data loaded");
     }
 
     // =================================================================== helpers
 
     private static UUID company(String name, String industry, String db, LocalDate onboarded) {
-        UUID id = Db.scalar("""
-                INSERT INTO companies(name, industry, integration_mode, sap_company_db, sl_username, sl_password_enc, onboarded_on,
-                                      connection_status, connection_message, last_tested_at)
-                VALUES (?,?, 'MOCK', ?, 'manager', ?, ?, 'OK', 'Connected to ' || ?, now()) RETURNING id""", UUID.class,
-                name, industry, db, Crypto.encrypt("manager"), onboarded, db);
-        Db.exec("INSERT INTO company_settings(company_id) VALUES (?)", id);
-        String adminEmail = switch (name) {
-            case "Dhash Fabrication Pvt Ltd" -> "admin@dhashfab.com";
-            case "Ikyam Solutions Pvt Ltd" -> "vijaya.shree@ikyam.com";
-            default -> null;
-        };
-        if (adminEmail != null) {
-            user(id, adminEmail.startsWith("admin") ? "D. Selvam" : "Vijaya Shree", adminEmail, "ADMIN", null, null, null, "invite-" + UUID.randomUUID());
-        }
-        return id;
+        return Db.tx(() -> {
+            String schema = Tenants.createSchema();
+            UUID id = Db.scalar("""
+                    INSERT INTO companies(name, industry, integration_mode, sap_company_db, sl_username, sl_password_enc, onboarded_on,
+                                          connection_status, connection_message, last_tested_at, schema_id)
+                    VALUES (?,?, 'MOCK', ?, 'manager', ?, ?, 'OK', 'Connected to ' || ?, now(), ?) RETURNING id""", UUID.class,
+                    name, industry, db, Crypto.encrypt("manager"), onboarded, db, schema);
+            Db.exec("INSERT INTO company_settings(company_id) VALUES (?)", id);
+            String adminEmail = switch (name) {
+                case "Dhash Fabrication Pvt Ltd" -> "admin@dhashfab.com";
+                case "Ikyam Solutions Pvt Ltd" -> "vijaya.shree@ikyam.com";
+                default -> null;
+            };
+            if (adminEmail != null) {
+                TenantContext.run(schema, () -> user(id, adminEmail.startsWith("admin") ? "D. Selvam" : "Vijaya Shree", adminEmail,
+                        "ADMIN", null, null, null, "invite-" + UUID.randomUUID()));
+            }
+            return id;
+        });
     }
 
     private static UUID user(UUID c, String name, String email, String role, String hash, String dept, Integer emp, String invite) {

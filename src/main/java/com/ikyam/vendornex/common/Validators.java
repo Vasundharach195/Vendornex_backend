@@ -41,10 +41,10 @@ public final class Validators {
         return s;
     }
 
-    /** GSTIN characters 3–12 are the PAN — catches mismatched data entry. */
-    public static void gstinMatchesPan(String gstin, String pan) {
-        if (gstin != null && pan != null && !gstin.substring(2, 12).equals(pan)) {
-            throw ApiException.badRequest("GSTIN does not contain the PAN " + pan + " (characters 3–12 must match)");
-        }
-    }
+//    /** GSTIN characters 3–12 are the PAN — catches mismatched data entry. */
+//    public static void gstinMatchesPan(String gstin, String pan) {
+//        if (gstin != null && pan != null && !gstin.substring(2, 12).equals(pan)) {
+//            throw ApiException.badRequest("GSTIN does not contain the PAN " + pan + " (characters 3–12 must match)");
+//        }
+//    }
 }

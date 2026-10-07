@@ -6,6 +6,7 @@ import com.ikyam.vendornex.db.Row;
 import com.ikyam.vendornex.sap.SapB1Gateway.*;
 import com.ikyam.vendornex.sap.SapB1Gateway;
 import com.ikyam.vendornex.sap.SapGatewayFactory;
+import com.ikyam.vendornex.tenant.Tenants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,8 +25,12 @@ public final class MasterSyncService {
     private static final Logger log = LoggerFactory.getLogger(MasterSyncService.class);
     private static final Set<UUID> RUNNING = ConcurrentHashMap.newKeySet();
 
-    public static final List<String> ALL = List.of("WAREHOUSES", "ITEMS", "VENDOR_GROUPS", "BUSINESS_PARTNERS",
-            "EMPLOYEES", "TAX_CODES", "PURCHASE_REQUESTS", "PURCHASE_ORDERS");
+    /** Lightest first, Items (heaviest read) last, so a Service Layer that struggles still gets the small masters done. */
+    public static final List<String> ALL = List.of("EMPLOYEES", "WAREHOUSES", "VENDOR_GROUPS", "TAX_CODES", "BUSINESS_PARTNERS",
+            "ITEMS", "PURCHASE_REQUESTS", "PURCHASE_ORDERS");
+
+    /** Pause between entities so the Service Layer is not hit with back-to-back heavy reads. */
+    private static final long PAUSE_BETWEEN_ENTITIES_MS = 3000;
 
     private MasterSyncService() {}
 
@@ -37,15 +42,33 @@ public final class MasterSyncService {
     public static boolean sync(UUID companyId, List<String> entities, String trigger) {
         if (!RUNNING.add(companyId)) return false;
         try {
-            SapB1Gateway g = SapGatewayFactory.forCompany(companyId);
-            for (String e : (entities == null || entities.isEmpty() ? ALL : entities)) run(companyId, g, e, trigger);
+            // Callers (Super Admin, scheduler, background jobs) may have no company context yet.
+            Tenants.run(companyId, () -> {
+                SapB1Gateway g = SapGatewayFactory.forCompany(companyId);
+                boolean first = true;
+                for (String e : (entities == null || entities.isEmpty() ? ALL : entities)) {
+                    if (!first) pause();
+                    first = false;
+                    // The Service Layer is unreachable: stop here instead of retrying every remaining entity.
+                    if (!run(companyId, g, e, trigger)) break;
+                }
+            });
             return true;
         } finally {
             RUNNING.remove(companyId);
         }
     }
 
-    private static void run(UUID companyId, SapB1Gateway g, String entity, String trigger) {
+    private static void pause() {
+        try {
+            Thread.sleep(PAUSE_BETWEEN_ENTITIES_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Returns false when the sync should stop because the Service Layer could not be reached at all. */
+    private static boolean run(UUID companyId, SapB1Gateway g, String entity, String trigger) {
         UUID runId = Db.scalar("INSERT INTO sync_runs(company_id, entity, trigger_type, status) VALUES (?,?,?, 'RUNNING') RETURNING id",
                 UUID.class, companyId, entity, trigger);
         try {
@@ -64,7 +87,10 @@ public final class MasterSyncService {
         } catch (Exception e) {
             log.warn("Master sync {} failed for company {}: {}", entity, companyId, e.getMessage());
             Db.exec("UPDATE sync_runs SET status = 'FAILED', error_detail = ?, finished_at = now() WHERE id = ?", e.getMessage(), runId);
+            // httpStatus 0 = no HTTP response at all (connection refused / timed out), already retried by the gateway.
+            return !(e instanceof com.ikyam.vendornex.sap.SapException se && se.httpStatus == 0);
         }
+        return true;
     }
 
     // ------------------------------------------------------------------ masters
@@ -267,12 +293,16 @@ public final class MasterSyncService {
     /** Called by the scheduler: syncs every active company whose interval has elapsed. */
     public static void runDue() {
         for (Row c : Db.query("""
-                SELECT c.id FROM companies c JOIN company_settings s ON s.company_id = c.id
-                 WHERE c.is_active AND c.connection_status <> 'FAILED'
-                   AND NOT EXISTS (SELECT 1 FROM sync_runs r WHERE r.company_id = c.id AND r.entity = 'ITEMS'
-                                     AND r.started_at > now() - (s.master_sync_interval_min * interval '1 minute'))""")) {
+                SELECT c.id, s.master_sync_interval_min FROM companies c JOIN company_settings s ON s.company_id = c.id
+                 WHERE c.is_active AND c.connection_status <> 'FAILED' AND c.schema_id IS NOT NULL""")) {
+            UUID id = c.uuid("id");
             try {
-                sync(c.uuid("id"), null, "SCHEDULED");
+                // sync_runs is a per-company table, so "is a sync due?" is asked inside that company's schema.
+                Boolean recent = Tenants.call(id, () -> Db.scalar("""
+                        SELECT EXISTS (SELECT 1 FROM sync_runs r WHERE r.company_id = ? AND r.entity = 'ITEMS'
+                                         AND r.started_at > now() - (? * interval '1 minute'))""",
+                        Boolean.class, id, c.integer("masterSyncIntervalMin")));
+                if (!Boolean.TRUE.equals(recent)) sync(id, null, "SCHEDULED");
             } catch (Exception e) {
                 log.warn("Scheduled sync failed for {}: {}", c.str("id"), e.getMessage());
             }

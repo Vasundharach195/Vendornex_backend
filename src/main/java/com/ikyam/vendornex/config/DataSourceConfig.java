@@ -1,6 +1,7 @@
 package com.ikyam.vendornex.config;
 
 import com.ikyam.vendornex.db.Migrator;
+import com.ikyam.vendornex.tenant.TenantRoutingDataSource;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.context.annotation.Bean;
@@ -15,12 +16,12 @@ import javax.sql.DataSource;
  * share, tuned identically to {@code Db.init} (which the legacy {@code Db} helper still uses in
  * parallel while domains are converted stage by stage — see the migration plan). Both pools point
  * at pgbouncer in transaction-pooling mode, hence the same {@code prepareThreshold=0} / shortened
- * lifetimes.
+ * lifetimes. Both are wrapped in {@link TenantRoutingDataSource}, which points every statement at
+ * the current company's schema.
  *
  * <p>The migration runs inside this bean's factory method, before the {@link HikariDataSource} is
  * returned, so Spring's dependency graph — not {@code @PostConstruct} ordering luck — guarantees
- * every schema-touching bean (Hibernate's schema validator included, since {@code ddl-auto=validate}
- * runs at {@code EntityManagerFactory} creation) sees an already-migrated database. {@link StartupConfig}
+ * every schema-touching bean sees an already-migrated database. {@link StartupConfig}
  * depends on this bean for the same reason.
  */
 @Configuration
@@ -43,7 +44,7 @@ public class DataSourceConfig {
         hc.setIdleTimeout(5 * 60_000L);
         hc.addDataSourceProperty("prepareThreshold", "0");
         hc.addDataSourceProperty("ApplicationName", "vendornex-api-jpa");
-        return new HikariDataSource(hc);
+        return new TenantRoutingDataSource(new HikariDataSource(hc));
     }
 
     @Bean

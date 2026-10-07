@@ -101,8 +101,8 @@ public class VendorService {
         if (f.legalName == null && f.contactName == null && f.email == null) {
             throw ApiException.badRequest("Add at least a name or e-mail before saving");
         }
-        Vendor v = new Vendor(companyId, f.legalName == null ? "(untitled vendor)" : f.legalName, userId);
-        vendors.save(v);
+        Vendor v = new Vendor(companyId, f.legalName, userId);
+        vendors.saveAndFlush(v);   // flush now: f.write and findFullById below use JDBC and must see this row
         f.write(v.getId(), req.wizardStep, queries);
         return queries.findFullById(v.getId());
     }
@@ -175,7 +175,7 @@ public class VendorService {
         for (VendorDocument d : documents.findByVendorIdOrderByDocType(v.uuid("id"))) docTypes.add(d.getDocType());
         for (String d : REQUIRED_DOCS) if (!docTypes.contains(d)) missing.add(d + " certificate upload");
         if (!missing.isEmpty()) throw ApiException.badRequest("Complete these before submitting: " + String.join(", ", missing));
-        Validators.gstinMatchesPan(v.str("gstin"), v.str("pan"));
+       // Validators.gstinMatchesPan(v.str("gstin"), v.str("pan"));
         if (!queries.vendorGroupExists(c, v.integer("vendorGroupCode"))) {
             throw ApiException.badRequest("Vendor group " + v.integer("vendorGroupCode") + " does not exist in SAP B1 — sync masters or pick another group");
         }

@@ -2,18 +2,22 @@ package com.ikyam.vendornex.sap;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.ikyam.vendornex.db.Db;
 import com.ikyam.vendornex.http.Json;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -38,7 +42,8 @@ import java.util.concurrent.locks.ReentrantLock;
 public class ServiceLayerGateway implements SapB1Gateway {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceLayerGateway.class);
-    private static final int PAGE_SIZE = Integer.parseInt(System.getenv().getOrDefault("SL_PAGE_SIZE", "500"));
+    private static final int PAGE_SIZE = Integer.parseInt(System.getenv().getOrDefault("SL_PAGE_SIZE", "100"));
+    private static final int CONNECT_ATTEMPTS = 3;
     private static final String GRPO_DRAFT_OBJECT = "oPurchaseDeliveryNotes";
 
     private final String baseUrl;
@@ -51,6 +56,9 @@ public class ServiceLayerGateway implements SapB1Gateway {
     private volatile String cookieHeader;
     private volatile Instant sessionExpiresAt = Instant.EPOCH;
     private volatile String version;
+    /** Set by SapGatewayFactory for real companies; null for throw-away gateways (connection tests). */
+    private volatile UUID trackedCompanyId;
+    private volatile String trackedSchemaId;
 
     public ServiceLayerGateway(String baseUrl, String companyDb, String username, String password, boolean verifyTls) {
         if (baseUrl == null || companyDb == null || username == null || password == null) {
@@ -61,9 +69,17 @@ public class ServiceLayerGateway implements SapB1Gateway {
         this.username = username;
         this.password = password;
         HttpClient.Builder b = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(15))
                 .version(HttpClient.Version.HTTP_1_1);
-        if (!verifyTls) b.sslContext(trustAllContext());
+        System.out.println("--------------2---------------");
+        System.out.println(b);
+        System.out.println("verifyTls"+ verifyTls);
+        if (!verifyTls) {
+            b.sslContext(trustAllContext());
+            SSLParameters sslParams = new SSLParameters();
+            sslParams.setEndpointIdentificationAlgorithm(null);
+            b.sslParameters(sslParams);
+        }
         this.http = b.build();
     }
 
@@ -80,6 +96,7 @@ public class ServiceLayerGateway implements SapB1Gateway {
     @Override
     public ConnectionInfo testConnection() {
         try {
+            logout();
             invalidateSession();
             login();
             get("Warehouses", Map.of("$select", "WarehouseCode", "$top", "1"));
@@ -97,32 +114,84 @@ public class ServiceLayerGateway implements SapB1Gateway {
             body.put("CompanyDB", companyDb);
             body.put("UserName", username);
             body.put("Password", password);
+            System.out.println(URI.create(baseUrl + "/Login"));
+            
             HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/Login"))
-                    .timeout(Duration.ofSeconds(30))
+                    .timeout(Duration.ofSeconds(60))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(Json.write(body)))
                     .build();
-            HttpResponse<String> res = send(req);
-            if (res.statusCode() != 200) {
-                throw new SapException("Service Layer login failed: " + errorMessage(res.body()), res.statusCode(),
-                        res.statusCode() >= 500, null);
-            }
-            List<String> cookies = new ArrayList<>();
-            for (String sc : res.headers().allValues("set-cookie")) {
-                String kv = sc.split(";", 2)[0];
-                if (kv.startsWith("B1SESSION=") || kv.startsWith("ROUTEID=")) cookies.add(kv);
-            }
-            JsonNode j = Json.parse(res.body());
-            if (cookies.stream().noneMatch(c -> c.startsWith("B1SESSION="))) {
-                cookies.add("B1SESSION=" + j.path("SessionId").asText());
-            }
-            cookieHeader = String.join("; ", cookies);
-            int timeoutMin = j.path("SessionTimeout").asInt(30);
-            sessionExpiresAt = Instant.now().plusSeconds(Math.max(60, timeoutMin * 60L - 60));
-            version = j.path("Version").asText(null);
-            log.info("Service Layer session opened for {} at {}", companyDb, baseUrl);
+            System.out.println(req);
+           try {
+        	   HttpResponse<String> res = send(req);
+               System.out.println("----------res-----------");
+               System.out.println(res.statusCode());
+               System.out.println(res.body());
+               if (res.statusCode() != 200) {
+                   throw new SapException("Service Layer login failed: " + errorMessage(res.body()), res.statusCode(),
+                           res.statusCode() >= 500, null);
+               }
+               List<String> cookies = new ArrayList<>();
+               for (String sc : res.headers().allValues("set-cookie")) {
+                   String kv = sc.split(";", 2)[0];
+                   if (kv.startsWith("B1SESSION=") || kv.startsWith("ROUTEID=")) cookies.add(kv);
+               }
+               JsonNode j = Json.parse(res.body());
+               if (cookies.stream().noneMatch(c -> c.startsWith("B1SESSION="))) {
+                   cookies.add("B1SESSION=" + j.path("SessionId").asText());
+               }
+               cookieHeader = String.join("; ", cookies);
+               int timeoutMin = j.path("SessionTimeout").asInt(30);
+               sessionExpiresAt = Instant.now().plusSeconds(Math.max(60, timeoutMin * 60L - 60));
+               version = j.path("Version").asText(null);
+               saveSession(j.path("SessionId").asText(null));
+               log.info("Service Layer session opened for {} at {}", companyDb, baseUrl);
+           }catch (Exception e) {
+        	   System.out.println(e);
+        	   throw e; // a failed login must reach the caller, or the real error is hidden
+           }
         } finally {
             loginLock.unlock();
+        }
+    }
+
+    /** Makes this gateway record each B1 session it opens in ik_vendor.b1_sessions. */
+    void trackSession(UUID companyId, String schemaId) {
+        this.trackedCompanyId = companyId;
+        this.trackedSchemaId = schemaId;
+    }
+
+    /** One row per company: the latest SessionId returned by POST /Login. Bookkeeping only, never blocks a login. */
+    private void saveSession(String sessionId) {
+        UUID id = trackedCompanyId;
+        if (id == null) return;
+        try {
+            Db.exec("""
+                    INSERT INTO ik_vendor.b1_sessions(company_id, schema_id, sap_username, session_id, sap_db, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (company_id) DO UPDATE SET schema_id = EXCLUDED.schema_id, sap_username = EXCLUDED.sap_username,
+                        session_id = EXCLUDED.session_id, sap_db = EXCLUDED.sap_db, expires_at = EXCLUDED.expires_at,
+                        updated_at = now()""",
+                    id, trackedSchemaId, username, sessionId, companyDb, java.sql.Timestamp.from(sessionExpiresAt));
+        } catch (Exception e) {
+            log.warn("Could not store B1 session for company {}: {}", id, e.getMessage());
+        }
+    }
+
+    /** Best-effort POST /Logout so a replaced session does not stay open on the Service Layer until it times out. */
+    private void logout() {
+        String cookie = cookieHeader;
+        if (cookie == null) return;
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/Logout"))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Cookie", cookie)
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            http.send(req, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            log.debug("Service Layer logout skipped: {}", e.getMessage());
         }
     }
 
@@ -133,15 +202,43 @@ public class ServiceLayerGateway implements SapB1Gateway {
 
     // ================================================================ HTTP plumbing
 
+    /**
+    /**
+     * Sends a request, retrying when the Service Layer refuses or drops the connection (it is often
+     * briefly unavailable while heavy reads such as Items are running). A connection that never opened
+     * ({@link ConnectException}) is safe to retry for any method; other I/O failures are retried for
+     * GET only, because a POST may already have reached SAP.
+     */
     private HttpResponse<String> send(HttpRequest req) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                // java.net.http wraps the real reason (refused / timed out / unreachable / unresolved host) in the cause chain.
+                Throwable root = e;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                boolean retry = attempt < CONNECT_ATTEMPTS
+                        && (e instanceof ConnectException || e instanceof HttpConnectTimeoutException || "GET".equals(req.method()));
+                log.warn("Service Layer request to {} failed (attempt {}/{}){}", req.uri(), attempt, CONNECT_ATTEMPTS,
+                        retry ? ", retrying" : "", e);
+                if (!retry) {
+                    throw new SapException("Cannot reach SAP B1 Service Layer at " + baseUrl + " (" + e.getClass().getSimpleName()
+                            + (e.getMessage() == null ? "" : ": " + e.getMessage())
+                            + (root != e ? " <- " + root.getClass().getSimpleName() + ": " + root.getMessage() : "") + ")", 0, true, null);
+                }
+                pause(attempt * 3000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SapException("Interrupted while calling Service Layer", 0, true, null);
+            }
+        }
+    }
+
+    private static void pause(long millis) {
         try {
-            return http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new SapException("Cannot reach SAP B1 Service Layer at " + baseUrl + " (" + e.getClass().getSimpleName()
-                    + (e.getMessage() == null ? "" : ": " + e.getMessage()) + ")", 0, true, null);
+            Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new SapException("Interrupted while calling Service Layer", 0, true, null);
         }
     }
 
@@ -456,7 +553,8 @@ public class ServiceLayerGateway implements SapB1Gateway {
     /**
      * Many on-premise Service Layer installs use a self-signed certificate. Prefer importing it into
      * the JVM truststore; this switch exists for test systems only (per company: sl_verify_tls = false).
-     * Hostname verification additionally requires -Djdk.internal.httpclient.disableHostnameVerification=true.
+     * Hostname verification is disabled alongside this trust-all context (see the sslParameters set on
+     * the HttpClient.Builder above), so no JVM-wide system property is required.
      */
     private static SSLContext trustAllContext() {
         try {

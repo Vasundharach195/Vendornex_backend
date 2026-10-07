@@ -10,6 +10,7 @@ import com.ikyam.vendornex.sap.B1Payloads;
 import com.ikyam.vendornex.sap.SapB1Gateway;
 import com.ikyam.vendornex.sap.SapException;
 import com.ikyam.vendornex.sap.SapGatewayFactory;
+import com.ikyam.vendornex.tenant.Tenants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,6 +77,13 @@ public final class SyncService {
 
     /** Background worker tick: claims due rows with SKIP LOCKED so several instances can run safely. */
     public static int runWorker(int batch) {
+        // sync_transactions is a per-company table: the worker visits each company's schema in turn.
+        int[] total = {0};
+        Tenants.forEach(companyId -> total[0] += runWorkerForCurrentCompany(batch));
+        return total[0];
+    }
+
+    private static int runWorkerForCurrentCompany(int batch) {
         // Rows stuck in RUNNING (instance died mid-call) are released after 10 minutes.
         Db.exec("UPDATE sync_transactions SET status = 'QUEUED' WHERE status = 'RUNNING' AND next_attempt_at < now() - interval '10 minutes'");
         List<Row> claimed = Db.query("""
