@@ -4,25 +4,39 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ikyam.vendornex.db.Db;
 import com.ikyam.vendornex.http.Json;
+import org.apache.hc.client5.http.ConnectTimeoutException;
+import org.apache.hc.client5.http.DnsResolver;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactoryBuilder;
+import org.apache.hc.core5.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClient;
 
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.ConnectException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpConnectTimeoutException;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
@@ -50,7 +64,7 @@ public class ServiceLayerGateway implements SapB1Gateway {
     private final String companyDb;
     private final String username;
     private final String password;
-    private final HttpClient http;
+    private final RestClient rest;
 
     private final ReentrantLock loginLock = new ReentrantLock();
     private volatile String cookieHeader;
@@ -68,19 +82,78 @@ public class ServiceLayerGateway implements SapB1Gateway {
         this.companyDb = companyDb;
         this.username = username;
         this.password = password;
-        HttpClient.Builder b = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .version(HttpClient.Version.HTTP_1_1);
-        System.out.println("--------------2---------------");
-        System.out.println(b);
-        System.out.println("verifyTls"+ verifyTls);
+        URI root = URI.create(this.baseUrl);
+        int port = root.getPort() != -1 ? root.getPort() : "http".equalsIgnoreCase(root.getScheme()) ? 80 : 443;
+        // Apache HttpClient tries every address the host resolves to; java.net.http only tries the first one.
+        PoolingHttpClientConnectionManagerBuilder cm = PoolingHttpClientConnectionManagerBuilder.create()
+                .setDnsResolver(new ReachableFirstResolver(port))
+                .setDefaultConnectionConfig(ConnectionConfig.custom().setConnectTimeout(Timeout.ofSeconds(15)).build());
+    
         if (!verifyTls) {
-            b.sslContext(trustAllContext());
-            SSLParameters sslParams = new SSLParameters();
-            sslParams.setEndpointIdentificationAlgorithm(null);
-            b.sslParameters(sslParams);
+            cm.setSSLSocketFactory(SSLConnectionSocketFactoryBuilder.create()
+                    .setSslContext(trustAllContext())
+                    .setHostnameVerifier(NoopHostnameVerifier.INSTANCE)
+                    .build());
         }
-        this.http = b.build();
+        CloseableHttpClient client = HttpClients.custom()
+                .setConnectionManager(cm.build())
+                .setDefaultRequestConfig(RequestConfig.custom().setResponseTimeout(Timeout.ofSeconds(90)).build())
+                .disableCookieManagement() // B1SESSION / ROUTEID are sent explicitly in the Cookie header
+                .disableAutomaticRetries() // send() does its own retrying
+                .disableRedirectHandling()
+                .build();
+        this.rest = RestClient.builder().requestFactory(new HttpComponentsClientHttpRequestFactory(client)).build();
+    }
+
+    /**
+     * A Service Layer host name can resolve to several addresses of which only some listen on the
+     * Service Layer port (e.g. the company website shares the name). Addresses that accept a
+     * connection are returned first; the others stay in the list as fallbacks.
+     */
+    private static final class ReachableFirstResolver implements DnsResolver {
+        private static final long CACHE_MS = 5 * 60_000L;
+        private static final int PROBE_TIMEOUT_MS = 3000;
+
+        private final int port;
+        private volatile String cachedHost;
+        private volatile InetAddress[] cached;
+        private volatile long cachedAt;
+
+        ReachableFirstResolver(int port) {
+            this.port = port;
+        }
+
+        @Override
+        public InetAddress[] resolve(String host) throws UnknownHostException {
+            InetAddress[] c = cached;
+            if (c != null && host.equals(cachedHost) && System.currentTimeMillis() - cachedAt < CACHE_MS) return c;
+            InetAddress[] all = InetAddress.getAllByName(host);
+            if (all.length > 1) {
+                List<InetAddress> ordered = new ArrayList<>();
+                List<InetAddress> unreachable = new ArrayList<>();
+                for (InetAddress a : all) (accepts(a) ? ordered : unreachable).add(a);
+                ordered.addAll(unreachable);
+                all = ordered.toArray(new InetAddress[0]);
+            }
+            cachedHost = host;
+            cached = all;
+            cachedAt = System.currentTimeMillis();
+            return all;
+        }
+
+        @Override
+        public String resolveCanonicalHostname(String host) throws UnknownHostException {
+            return InetAddress.getByName(host).getCanonicalHostName();
+        }
+
+        private boolean accepts(InetAddress address) {
+            try (Socket s = new Socket()) {
+                s.connect(new InetSocketAddress(address, port), PROBE_TIMEOUT_MS);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
     }
 
     /** Accepts "https://host:50000", ".../b1s/v1" or ".../b1s/v2" and returns the v1 root. */
@@ -114,29 +187,20 @@ public class ServiceLayerGateway implements SapB1Gateway {
             body.put("CompanyDB", companyDb);
             body.put("UserName", username);
             body.put("Password", password);
-            System.out.println(URI.create(baseUrl + "/Login"));
-            
-            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/Login"))
-                    .timeout(Duration.ofSeconds(60))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(Json.write(body)))
-                    .build();
-            System.out.println(req);
+            URI uri = URI.create(baseUrl + "/Login");
            try {
-        	   HttpResponse<String> res = send(req);
-               System.out.println("----------res-----------");
-               System.out.println(res.statusCode());
-               System.out.println(res.body());
-               if (res.statusCode() != 200) {
-                   throw new SapException("Service Layer login failed: " + errorMessage(res.body()), res.statusCode(),
-                           res.statusCode() >= 500, null);
+        	   ResponseEntity<String> res = send(HttpMethod.POST, uri, Map.of(), Json.write(body));
+          
+               if (res.getStatusCode().value() != 200) {
+                   throw new SapException("Service Layer login failed: " + errorMessage(res.getBody()), res.getStatusCode().value(),
+                           res.getStatusCode().value() >= 500, null);
                }
                List<String> cookies = new ArrayList<>();
-               for (String sc : res.headers().allValues("set-cookie")) {
+               for (String sc : res.getHeaders().getOrEmpty(HttpHeaders.SET_COOKIE)) {
                    String kv = sc.split(";", 2)[0];
                    if (kv.startsWith("B1SESSION=") || kv.startsWith("ROUTEID=")) cookies.add(kv);
                }
-               JsonNode j = Json.parse(res.body());
+               JsonNode j = Json.parse(res.getBody());
                if (cookies.stream().noneMatch(c -> c.startsWith("B1SESSION="))) {
                    cookies.add("B1SESSION=" + j.path("SessionId").asText());
                }
@@ -183,14 +247,12 @@ public class ServiceLayerGateway implements SapB1Gateway {
         String cookie = cookieHeader;
         if (cookie == null) return;
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/Logout"))
-                    .timeout(Duration.ofSeconds(10))
+            rest.post()
+                    .uri(URI.create(baseUrl + "/Logout"))
                     .header("Cookie", cookie)
-                    .POST(HttpRequest.BodyPublishers.noBody())
-                    .build();
-            http.send(req, HttpResponse.BodyHandlers.discarding());
+                    .retrieve()
+                    .toBodilessEntity();
         } catch (Exception e) {
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             log.debug("Service Layer logout skipped: {}", e.getMessage());
         }
     }
@@ -209,17 +271,26 @@ public class ServiceLayerGateway implements SapB1Gateway {
      * ({@link ConnectException}) is safe to retry for any method; other I/O failures are retried for
      * GET only, because a POST may already have reached SAP.
      */
-    private HttpResponse<String> send(HttpRequest req) {
+    private ResponseEntity<String> send(HttpMethod method, URI uri, Map<String, String> headers, String body) {
         for (int attempt = 1; ; attempt++) {
             try {
-                return http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            } catch (IOException e) {
-                // java.net.http wraps the real reason (refused / timed out / unreachable / unresolved host) in the cause chain.
+                RestClient.RequestBodySpec spec = rest.method(method).uri(uri);
+                headers.forEach((k, v) -> spec.header(k, v));
+                if (body != null) spec.contentType(MediaType.APPLICATION_JSON).body(body);
+                // exchange() returns every status as-is (retrieve() would throw on 4xx/5xx); callers map SAP errors themselves.
+                return spec.exchange((rq, rs) -> ResponseEntity.status(rs.getStatusCode()).headers(rs.getHeaders())
+                        .body(new String(rs.getBody().readAllBytes(), StandardCharsets.UTF_8)));
+            } catch (ResourceAccessException ex) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new SapException("Interrupted while calling Service Layer", 0, true, null);
+                }
+                // RestClient wraps the I/O failure; the real reason (refused / timed out / unreachable / unresolved host) is below it.
+                Throwable e = ex.getCause() != null ? ex.getCause() : ex;
                 Throwable root = e;
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();
                 boolean retry = attempt < CONNECT_ATTEMPTS
-                        && (e instanceof ConnectException || e instanceof HttpConnectTimeoutException || "GET".equals(req.method()));
-                log.warn("Service Layer request to {} failed (attempt {}/{}){}", req.uri(), attempt, CONNECT_ATTEMPTS,
+                        && (e instanceof ConnectException || e instanceof ConnectTimeoutException || HttpMethod.GET.equals(method));
+                log.warn("Service Layer request to {} failed (attempt {}/{}){}", uri, attempt, CONNECT_ATTEMPTS,
                         retry ? ", retrying" : "", e);
                 if (!retry) {
                     throw new SapException("Cannot reach SAP B1 Service Layer at " + baseUrl + " (" + e.getClass().getSimpleName()
@@ -227,9 +298,6 @@ public class ServiceLayerGateway implements SapB1Gateway {
                             + (root != e ? " <- " + root.getClass().getSimpleName() + ": " + root.getMessage() : "") + ")", 0, true, null);
                 }
                 pause(attempt * 3000L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new SapException("Interrupted while calling Service Layer", 0, true, null);
             }
         }
     }
@@ -243,27 +311,23 @@ public class ServiceLayerGateway implements SapB1Gateway {
     }
 
     /** Executes a call with the session cookie; on 401 re-logs in once and retries. */
-    private HttpResponse<String> call(String method, String pathAndQuery, JsonNode body, Map<String, String> extraHeaders) {
+    private ResponseEntity<String> call(String method, String pathAndQuery, JsonNode body, Map<String, String> extraHeaders) {
         for (int attempt = 0; attempt < 2; attempt++) {
             login();
             String url = pathAndQuery.startsWith("http") ? pathAndQuery : baseUrl + "/" + pathAndQuery;
-            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(90))
-                    .header("Cookie", cookieHeader)
-                    .header("Accept", "application/json");
-            extraHeaders.forEach(b::header);
-            HttpRequest.BodyPublisher pub = body == null ? HttpRequest.BodyPublishers.noBody()
-                    : HttpRequest.BodyPublishers.ofString(Json.write(body));
-            if (body != null) b.header("Content-Type", "application/json");
-            b.method(method, pub);
-            HttpResponse<String> res = send(b.build());
-            if (res.statusCode() == 401 && attempt == 0) {
+            Map<String, String> headers = new LinkedHashMap<>();
+            headers.put("Cookie", cookieHeader);
+            headers.put("Accept", "application/json");
+            headers.putAll(extraHeaders);
+            ResponseEntity<String> res = send(HttpMethod.valueOf(method), URI.create(url), headers,
+                    body == null ? null : Json.write(body));
+            if (res.getStatusCode().value() == 401 && attempt == 0) {
                 invalidateSession();
                 continue;
             }
-            if (res.statusCode() >= 400) {
-                boolean retryable = res.statusCode() >= 500 || res.statusCode() == 401 || res.statusCode() == 408 || res.statusCode() == 429;
-                throw new SapException(errorMessage(res.body()), res.statusCode(), retryable, errorCode(res.body()));
+            if (res.getStatusCode().value() >= 400) {
+                boolean retryable = res.getStatusCode().value() >= 500 || res.getStatusCode().value() == 401 || res.getStatusCode().value() == 408 || res.getStatusCode().value() == 429;
+                throw new SapException(errorMessage(res.getBody()), res.getStatusCode().value(), retryable, errorCode(res.getBody()));
             }
             return res;
         }
@@ -271,8 +335,8 @@ public class ServiceLayerGateway implements SapB1Gateway {
     }
 
     private JsonNode get(String entity, Map<String, String> query) {
-        HttpResponse<String> res = call("GET", entity + qs(query), null, Map.of());
-        return Json.parse(res.body());
+        ResponseEntity<String> res = call("GET", entity + qs(query), null, Map.of());
+        return Json.parse(res.getBody());
     }
 
     /** GET with server-driven paging, returning every row of the "value" array. */
@@ -281,8 +345,8 @@ public class ServiceLayerGateway implements SapB1Gateway {
         String next = entity + qs(query);
         int guard = 0;
         while (next != null && guard++ < 10_000) {
-            HttpResponse<String> res = call("GET", next, null, Map.of("Prefer", "odata.maxpagesize=" + PAGE_SIZE));
-            JsonNode j = Json.parse(res.body());
+            ResponseEntity<String> res = call("GET", next, null, Map.of("Prefer", "odata.maxpagesize=" + PAGE_SIZE));
+            JsonNode j = Json.parse(res.getBody());
             j.path("value").forEach(out::add);
             String link = j.hasNonNull("odata.nextLink") ? j.get("odata.nextLink").asText()
                     : j.hasNonNull("@odata.nextLink") ? j.get("@odata.nextLink").asText() : null;
@@ -299,8 +363,8 @@ public class ServiceLayerGateway implements SapB1Gateway {
     }
 
     private JsonNode post(String entity, JsonNode body) {
-        HttpResponse<String> res = call("POST", entity, body, Map.of());
-        return res.body() == null || res.body().isBlank() ? Json.obj() : Json.parse(res.body());
+        ResponseEntity<String> res = call("POST", entity, body, Map.of());
+        return res.getBody() == null || res.getBody().isBlank() ? Json.obj() : Json.parse(res.getBody());
     }
 
     private static String qs(Map<String, String> q) {
@@ -553,8 +617,8 @@ public class ServiceLayerGateway implements SapB1Gateway {
     /**
      * Many on-premise Service Layer installs use a self-signed certificate. Prefer importing it into
      * the JVM truststore; this switch exists for test systems only (per company: sl_verify_tls = false).
-     * Hostname verification is disabled alongside this trust-all context (see the sslParameters set on
-     * the HttpClient.Builder above), so no JVM-wide system property is required.
+     * Hostname verification is disabled alongside this trust-all context (see the NoopHostnameVerifier
+     * set on the connection manager above), so no JVM-wide system property is required.
      */
     private static SSLContext trustAllContext() {
         try {
