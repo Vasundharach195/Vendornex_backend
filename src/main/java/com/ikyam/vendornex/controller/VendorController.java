@@ -83,7 +83,10 @@ public class VendorController {
         UUID companyId = u.company();
         VendorService.SubmitResult result = service.submit(vendorId, companyId, u.userId());
         Row out = new Row();
-        for (UUID tx : result.postCommitSyncIds) out.put("sapSync", SyncService.processNow(tx));
+        for (UUID tx : result.postCommitSyncIds) {
+            out.put("sapSync", SyncService.processNow(tx));
+            out.put("sapPayload", SyncService.payloadOf(tx));
+        }
         out.put("vendor", service.detail(vendorId, companyId));
         out.put("warnings", result.warnings);
         return out;
@@ -99,6 +102,7 @@ public class VendorController {
         if (tx == null) throw ApiException.conflict("No previous B1 transaction to retry");
         Row out = new Row();
         out.put("sapSync", SyncService.retry(companyId, tx.uuid("id")));
+        out.put("sapPayload", SyncService.payloadOf(tx.uuid("id")));
         out.put("vendor", service.detail(vendorId, companyId));
         return out;
     }

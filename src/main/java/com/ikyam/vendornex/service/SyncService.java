@@ -64,6 +64,12 @@ public final class SyncService {
                   FROM sync_transactions WHERE source_type = ? AND source_id = ? ORDER BY created_at DESC LIMIT 1""", sourceType, sourceId);
     }
 
+    /** The JSON body sent to SAP B1 for a transaction. */
+    public static Object payloadOf(UUID txId) {
+        Row tx = Db.one("SELECT payload_snapshot FROM sync_transactions WHERE id = ?", txId);
+        return tx == null ? null : tx.get("payloadSnapshot");
+    }
+
     // ================================================================= processing
 
     /** Attempts one row immediately (call after the enqueueing transaction has committed). */

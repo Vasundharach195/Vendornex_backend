@@ -25,6 +25,9 @@ public final class B1Payloads {
     /** B1 object type of a Purchase Order, used as BaseType on GRPO lines. */
     public static final int OBJ_PURCHASE_ORDER = 22;
 
+    /** B1 branch (BPLId) sent on pushed Purchase Requests. Hard-coded until it becomes a company setting. */
+    public static final int DEFAULT_BRANCH_ID = 1;
+
     private B1Payloads() {}
 
     // ------------------------------------------------------------------ Business Partner (vendor)
@@ -100,6 +103,7 @@ public final class B1Payloads {
             p.put("ReqType", 12);           // B1 user
             p.put("Requester", slUser == null ? "manager" : slUser);
         }
+        p.put("BPL_IDAssignedToInvoice", DEFAULT_BRANCH_ID); // OPRQ.BPLId — hard-coded branch for now
         LocalDate req = pr.date("requiredDate");
         if (req != null) p.put("RequriedDate", req.toString()); // sic — Service Layer property name
         p.put("Comments", trim("VendorNex " + pr.str("prNo") + (pr.str("justification") == null ? "" : " | " + pr.str("justification")), 254));
@@ -123,6 +127,7 @@ public final class B1Payloads {
     public static ObjectNode purchaseOrder(Row po, List<Row> lines, Map<String, int[]> prBase, String ref) {
         ObjectNode p = Json.obj();
         p.put("CardCode", po.str("cardCode"));
+        p.put("BPL_IDAssignedToInvoice", DEFAULT_BRANCH_ID); // OPOR.BPLId — hard-coded branch for now
         p.put("DocDate", po.str("docDate"));
         p.put("DocDueDate", po.str("docDueDate"));
         p.put("Comments", trim("VendorNex " + ref + (po.str("remarks") == null ? "" : " | " + po.str("remarks")), 254));

@@ -184,7 +184,7 @@ public class PurchaseOrderController {
         });
         prs.forEach(purchaseRequestService::recomputeSourcing);
         Row sync = SyncService.processNow(out[1]);
-        return detail(c, out[0], null).with("sapSyncResult", sync);
+        return detail(c, out[0], null).with("sapSyncResult", sync).with("sapPayload", SyncService.payloadOf(out[1]));
     }
 
     @PostMapping("/api/purchase-orders/{id}/retry-sap")

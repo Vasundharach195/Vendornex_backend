@@ -348,6 +348,7 @@ public class ServiceLayerGateway implements SapB1Gateway {
             ResponseEntity<String> res = call("GET", next, null, Map.of("Prefer", "odata.maxpagesize=" + PAGE_SIZE));
             JsonNode j = Json.parse(res.getBody());
             j.path("value").forEach(out::add);
+            System.out.println("GET " + next + " -> value length = " + j.path("value").size() + " (total so far = " + out.size() + ")");
             String link = j.hasNonNull("odata.nextLink") ? j.get("odata.nextLink").asText()
                     : j.hasNonNull("@odata.nextLink") ? j.get("@odata.nextLink").asText() : null;
             if (link == null || link.isBlank()) {

@@ -62,7 +62,10 @@ public class ApprovalController {
         ApprovalService.ActResult result = service.act(stepId, u, approve, remarks);
         // B1 writes happen after the approval is committed, so a Service Layer outage never loses an approval.
         Row out = result.response;
-        for (UUID tx : result.postCommitSyncIds) out.put("sapSync", SyncService.processNow(tx));
+        for (UUID tx : result.postCommitSyncIds) {
+            out.put("sapSync", SyncService.processNow(tx));
+            out.put("sapPayload", SyncService.payloadOf(tx));
+        }
         return out;
     }
 }
