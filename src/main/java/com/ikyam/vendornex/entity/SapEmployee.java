@@ -9,7 +9,7 @@ import java.time.Instant;
 
 /** Maps {@code sap_employees} (OHEM mirror). */
 @Entity
-@Table(name = "sap_employees")
+@Table(name = "ik_sap_employees")
 public class SapEmployee {
 
     @EmbeddedId
@@ -23,9 +23,6 @@ public class SapEmployee {
 
     @Column(length = 200)
     private String email;
-
-    @Column(name = "last_synced_at", nullable = false)
-    private Instant lastSyncedAt = Instant.now();
 
     protected SapEmployee() {}
 

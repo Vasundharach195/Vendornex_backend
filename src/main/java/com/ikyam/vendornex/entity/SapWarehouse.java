@@ -12,7 +12,7 @@ import java.time.Instant;
  * keeps writing via {@code Db.batch}'s ON CONFLICT upsert (unconverted until Db.java's final
  * retirement) — this entity backs the simple read side ({@code MasterDataController.warehouses}). */
 @Entity
-@Table(name = "sap_warehouses")
+@Table(name = "ik_sap_warehouses")
 @DynamicUpdate
 public class SapWarehouse {
 
@@ -25,13 +25,9 @@ public class SapWarehouse {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
-    @Column(name = "last_synced_at", nullable = false)
-    private Instant lastSyncedAt = Instant.now();
-
     protected SapWarehouse() {}
 
     public SapWarehouseId getId() { return id; }
     public String getWarehouseName() { return warehouseName; }
     public boolean isActive() { return active; }
-    public Instant getLastSyncedAt() { return lastSyncedAt; }
 }

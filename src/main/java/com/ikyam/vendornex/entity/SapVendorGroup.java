@@ -9,7 +9,7 @@ import java.time.Instant;
 
 /** Maps {@code sap_vendor_groups} (OCRG mirror). */
 @Entity
-@Table(name = "sap_vendor_groups")
+@Table(name = "ik_sap_vendor_groups")
 public class SapVendorGroup {
 
     @EmbeddedId
@@ -17,9 +17,6 @@ public class SapVendorGroup {
 
     @Column(name = "group_name", nullable = false, length = 100)
     private String groupName;
-
-    @Column(name = "last_synced_at", nullable = false)
-    private Instant lastSyncedAt = Instant.now();
 
     protected SapVendorGroup() {}
 

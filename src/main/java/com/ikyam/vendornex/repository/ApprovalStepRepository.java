@@ -14,7 +14,7 @@ import java.util.UUID;
 
 public interface ApprovalStepRepository extends JpaRepository<ApprovalStep, UUID> {
 
-    /** Mirrors {@code SELECT * FROM approval_steps WHERE id=? AND company_id=? FOR UPDATE}. */
+    /** Mirrors {@code SELECT * FROM ik_approval_steps WHERE id=? AND company_id=? FOR UPDATE}. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from ApprovalStep a where a.id = :id and a.companyId = :companyId")
     Optional<ApprovalStep> lockByIdAndCompanyId(@Param("id") UUID id, @Param("companyId") UUID companyId);

@@ -1,6 +1,7 @@
 package com.ikyam.vendornex.service;
 
 import com.ikyam.vendornex.common.Validators;
+import com.ikyam.vendornex.db.Db;
 import com.ikyam.vendornex.dto.VendorFieldsRequest;
 import com.ikyam.vendornex.http.ApiException;
 import com.ikyam.vendornex.http.Json;
@@ -32,8 +33,15 @@ final class Fields {
         f.city = Json.optText(b.city);
         f.state = Json.optText(b.state);
         f.zipCode = Json.optText(b.zipCode);
-        f.country = Json.optText(b.country) == null ? null : Json.optText(b.country).toUpperCase(Locale.ROOT);
-        if (f.country != null && !f.country.matches("[A-Z]{2}")) throw ApiException.badRequest("Country must be a 2-letter ISO code (e.g. IN)");
+        f.country = Json.optText(b.country);
+        if (f.country != null) {
+            // The country must be one from the synced country master (ik_country, filled from SAP /Counties).
+            // Until the master has been synced there is nothing to check against, so the value is kept as typed.
+            String known = Db.scalar("SELECT country_code FROM ik_country WHERE upper(country_code) = upper(?) LIMIT 1", String.class, f.country);
+            if (known != null) f.country = known;
+            else if (Db.scalar("SELECT count(*) FROM ik_country", Long.class) > 0)
+                throw ApiException.badRequest("Country '" + f.country + "' is not in the country master — pick one of the synced countries");
+        }
         f.gstin = Validators.gstin(Json.optText(b.gstin));
         f.pan = Validators.pan(Json.optText(b.pan));
         f.bankName = Json.optText(b.bankName);
@@ -42,6 +50,8 @@ final class Fields {
         f.bankIfsc = Validators.ifsc(Json.optText(b.bankIfsc));
         f.sapBankCode = Json.optText(b.sapBankCode);
         f.groupCode = b.vendorGroupCode;
+       
+        
         if (f.groupCode != null) {
             f.groupName = queries.groupName(companyId, f.groupCode);
             if (f.groupName == null) throw ApiException.badRequest("Unknown vendor group " + f.groupCode);

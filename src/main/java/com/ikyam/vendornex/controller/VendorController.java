@@ -28,6 +28,8 @@ import java.util.UUID;
  * document management, activation/deactivation and B1 retry.
  */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class VendorController {
 
     private static final Set<String> DOC_TYPES = Set.of("GST", "PAN", "MSME", "INSURANCE", "CANCELLED_CHEQUE", "OTHER");
@@ -83,10 +85,7 @@ public class VendorController {
         UUID companyId = u.company();
         VendorService.SubmitResult result = service.submit(vendorId, companyId, u.userId());
         Row out = new Row();
-        for (UUID tx : result.postCommitSyncIds) {
-            out.put("sapSync", SyncService.processNow(tx));
-            out.put("sapPayload", SyncService.payloadOf(tx));
-        }
+        for (UUID tx : result.postCommitSyncIds) out.put("sapSync", SyncService.processNow(tx));
         out.put("vendor", service.detail(vendorId, companyId));
         out.put("warnings", result.warnings);
         return out;
@@ -103,6 +102,7 @@ public class VendorController {
         Row out = new Row();
         out.put("sapSync", SyncService.retry(companyId, tx.uuid("id")));
         out.put("sapPayload", SyncService.payloadOf(tx.uuid("id")));
+
         out.put("vendor", service.detail(vendorId, companyId));
         return out;
     }

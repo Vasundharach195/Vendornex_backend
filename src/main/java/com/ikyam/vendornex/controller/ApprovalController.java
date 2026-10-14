@@ -17,6 +17,8 @@ import java.util.UUID;
 
 /** HTTP surface of the approval engine (see {@link ApprovalService} for the shared business logic). */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class ApprovalController {
 
     private final ApprovalService service;
@@ -62,6 +64,8 @@ public class ApprovalController {
         ApprovalService.ActResult result = service.act(stepId, u, approve, remarks);
         // B1 writes happen after the approval is committed, so a Service Layer outage never loses an approval.
         Row out = result.response;
+       // for (UUID tx : result.postCommitSyncIds) out.put("sapSync", SyncService.processNow(tx));
+        
         for (UUID tx : result.postCommitSyncIds) {
             out.put("sapSync", SyncService.processNow(tx));
             out.put("sapPayload", SyncService.payloadOf(tx));

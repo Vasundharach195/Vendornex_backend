@@ -12,7 +12,7 @@ import java.util.UUID;
 public interface UserRepository extends JpaRepository<User, UUID> {
 
     /** E-mails are unique across all companies, so this checks global_users, not one company's users table. */
-    @Query(value = "SELECT EXISTS (SELECT 1 FROM global_users WHERE lower(email) = lower(:email))", nativeQuery = true)
+    @Query(value = "SELECT EXISTS (SELECT 1 FROM ik_global_users WHERE lower(email) = lower(:email))", nativeQuery = true)
     boolean existsByEmailIgnoreCase(@Param("email") String email);
 
     Optional<User> findByIdAndCompanyId(UUID id, UUID companyId);

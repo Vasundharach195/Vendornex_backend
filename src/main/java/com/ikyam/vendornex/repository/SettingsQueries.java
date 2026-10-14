@@ -33,27 +33,32 @@ public class SettingsQueries {
 
     public Row integrationInfo(UUID companyId) {
         List<Row> rows = namedJdbc.query("""
-                SELECT integration_mode, service_layer_base_url, sap_company_db, sl_username, connection_status, connection_message,
-                       sap_b1_version, last_tested_at FROM companies WHERE id = :id""",
+                SELECT c.integration_mode, d.base_url AS service_layer_base_url, d.company_db_code AS sap_company_db,
+                       d.sap_username AS sl_username, c.connection_status, c.connection_message,
+                       c.sap_b1_version, c.last_tested_at
+                  FROM ik_onboarding_company c
+                  LEFT JOIN LATERAL (SELECT base_url, company_db_code, sap_username FROM ik_sap_connection
+                                      WHERE is_active ORDER BY is_default DESC, sequence_no NULLS LAST LIMIT 1) d ON TRUE
+                 WHERE c.onboard_company_id = :id""",
                 new MapSqlParameterSource("id", companyId), GenericRowMapper.INSTANCE);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     public List<Row> approverCounts(UUID companyId) {
         return namedJdbc.query("""
-                SELECT s.stage, count(*) AS users FROM user_approval_stages s JOIN users u ON u.id = s.user_id
+                SELECT s.stage, count(*) AS users FROM ik_user_approval_stages s JOIN ik_users u ON u.id = s.user_id
                  WHERE u.company_id = :id AND u.status IN ('ACTIVE','INVITED') GROUP BY s.stage""",
                 new MapSqlParameterSource("id", companyId), GenericRowMapper.INSTANCE);
     }
 
     public boolean warehouseExists(UUID companyId, String code) {
-        Boolean r = namedJdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM sap_warehouses WHERE company_id = :c AND warehouse_code = :w)",
+        Boolean r = namedJdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM ik_sap_warehouses WHERE company_id = :c AND connection_id = ik_default_connection() AND warehouse_code = :w)",
                 new MapSqlParameterSource("c", companyId).addValue("w", code), Boolean.class);
         return Boolean.TRUE.equals(r);
     }
 
     public boolean taxCodeExists(UUID companyId, String code) {
-        Boolean r = namedJdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM sap_tax_codes WHERE company_id = :c AND tax_code = :t)",
+        Boolean r = namedJdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM ik_sap_tax_codes WHERE company_id = :c AND connection_id = ik_default_connection() AND tax_code = :t)",
                 new MapSqlParameterSource("c", companyId).addValue("t", code), Boolean.class);
         return Boolean.TRUE.equals(r);
     }
@@ -62,7 +67,7 @@ public class SettingsQueries {
                         String[] prStages, Integer bpSeries, String bpCodePrefix, int bpCodeNext, String defaultWarehouseCode,
                         String defaultTaxCode, String currency, boolean indiaLocalization, int masterSyncIntervalMin) {
         String sql = """
-                UPDATE company_settings SET pr_mode = ?, push_pr_to_b1 = ?, vendor_approval_stages = ?, requester_approval_stages = ?,
+                UPDATE ik_company_settings SET pr_mode = ?, push_pr_to_b1 = ?, vendor_approval_stages = ?, requester_approval_stages = ?,
                        pr_approval_stages = ?, bp_series = ?, bp_code_prefix = ?, bp_code_next = ?, default_warehouse_code = ?,
                        default_tax_code = ?, currency = ?, india_localization = ?, master_sync_interval_min = ?, updated_at = now()
                  WHERE company_id = ?""";

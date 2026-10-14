@@ -16,7 +16,7 @@ import java.util.UUID;
  * surface to hand-map field-by-field into a response Row without real risk of a silent omission.
  */
 @Entity
-@Table(name = "vendors")
+@Table(name = "ik_vendors")
 public class Vendor {
 
     @Id

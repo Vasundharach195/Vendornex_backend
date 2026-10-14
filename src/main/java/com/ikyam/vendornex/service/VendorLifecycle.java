@@ -22,21 +22,21 @@ public final class VendorLifecycle {
      * @return the sync transaction to process after commit, or null
      */
     public static UUID onApprovalComplete(UUID companyId, UUID vendorId, UUID userId) {
-        Row v = Db.one("SELECT link_type, sap_card_code FROM vendors WHERE id = ? AND company_id = ?", vendorId, companyId);
+        Row v = Db.one("SELECT link_type, sap_card_code FROM ik_vendors WHERE id = ? AND company_id = ?", vendorId, companyId);
         if ("EXISTING".equals(v.str("linkType")) && v.str("sapCardCode") != null) {
-            Db.exec("UPDATE vendors SET status = 'ACTIVE', activated_at = now(), updated_at = now() WHERE id = ?", vendorId);
+            Db.exec("UPDATE ik_vendors SET status = 'ACTIVE', activated_at = now(), updated_at = now() WHERE id = ?", vendorId);
             onActivated(vendorId);
             return null;
         }
-        Db.exec("UPDATE vendors SET status = 'SAP_SYNC_PENDING', updated_at = now() WHERE id = ?", vendorId);
+        Db.exec("UPDATE ik_vendors SET status = 'SAP_SYNC_PENDING', updated_at = now() WHERE id = ?", vendorId);
         return SyncService.enqueue(companyId, "CREATE_VENDOR", vendorId, userId);
     }
 
     /** Vendor is live: make sure it has a portal login and send (return) its invitation. */
     public static void onActivated(UUID vendorId) {
-        Row v = Db.one("SELECT id, company_id, legal_name, contact_name, email FROM vendors WHERE id = ?", vendorId);
+        Row v = Db.one("SELECT id, company_id, legal_name, contact_name, email FROM ik_vendors WHERE id = ?", vendorId);
         if (v.str("email") == null) return;
-        Row existing = Db.one("SELECT id, vendor_id, status FROM global_users WHERE lower(email) = lower(?)", v.str("email"));
+        Row existing = Db.one("SELECT id, vendor_id, status FROM ik_global_users WHERE lower(email) = lower(?)", v.str("email"));
         if (existing != null) {
             if (!vendorId.equals(existing.uuid("vendorId"))) {
                 log.warn("Vendor {} activated but e-mail {} already belongs to another user — no portal login created", vendorId, v.str("email"));
@@ -44,7 +44,7 @@ public final class VendorLifecycle {
             return;
         }
         UUID userId = Db.scalar("""
-                INSERT INTO users(company_id, name, email, role, status, vendor_id) VALUES (?,?,?, 'VENDOR', 'INVITED', ?) RETURNING id""",
+                INSERT INTO ik_users(company_id, name, email, role, status, vendor_id) VALUES (?,?,?, 'VENDOR', 'INVITED', ?) RETURNING id""",
                 UUID.class, v.uuid("companyId"), v.str("contactName") == null ? v.str("legalName") : v.str("contactName"),
                 v.str("email").toLowerCase(), vendorId);
         String link = AuthService.issueInvite(userId);

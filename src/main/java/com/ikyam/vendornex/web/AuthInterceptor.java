@@ -33,6 +33,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         if (!allowed) throw ApiException.forbidden("Your role cannot perform this action");
 
+        AuthService.selectConnection(request.getHeader("X-SAP-Connection-Id"), cu);
         request.setAttribute(CURRENT_USER_ATTR, cu);
         return true;
     }

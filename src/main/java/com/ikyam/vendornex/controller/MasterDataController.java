@@ -16,6 +16,8 @@ import java.util.Map;
 
 /** Read access to the synced SAP B1 masters (pickers + Data Hub) and the sync controls. */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class MasterDataController {
 
     private final MasterDataService service;
@@ -34,6 +36,24 @@ public class MasterDataController {
     @Roles({Role.ADMIN, Role.APPROVER, Role.REQUESTER})
     public Object warehouses(CurrentUser u) {
         return service.warehouses(u.company());
+    }
+
+    @GetMapping("/api/master/branches")
+    @Roles({Role.ADMIN, Role.APPROVER, Role.REQUESTER})
+    public Object branches(CurrentUser u) {
+        return service.branches();
+    }
+
+    @GetMapping("/api/master/states")
+    @Roles({Role.ADMIN, Role.APPROVER, Role.REQUESTER})
+    public Object states(@RequestParam(required = false) String country, CurrentUser u) {
+        return service.states(QueryParams.orNull(country));
+    }
+
+    @GetMapping("/api/master/countries")
+    @Roles({Role.ADMIN, Role.APPROVER, Role.REQUESTER})
+    public Object countries(CurrentUser u) {
+        return service.countries();
     }
 
     @GetMapping("/api/master/vendor-groups")

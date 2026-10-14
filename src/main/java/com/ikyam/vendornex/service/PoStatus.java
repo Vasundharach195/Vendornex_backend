@@ -10,7 +10,7 @@ public final class PoStatus {
 
     public static void recompute(UUID poId) {
         Db.exec("""
-                UPDATE purchase_orders p SET status = CASE
+                UPDATE ik_purchase_orders p SET status = CASE
                     WHEN q.all_received THEN 'COMPLETED'
                     WHEN q.any_received THEN 'PARTIALLY_RECEIVED'
                     WHEN q.all_shipped  THEN 'SHIPPED'
@@ -21,7 +21,7 @@ public final class PoStatus {
                     updated_at = now()
                   FROM (SELECT bool_and(received_qty >= quantity) AS all_received, bool_or(received_qty > 0) AS any_received,
                                bool_and(shipped_qty  >= quantity) AS all_shipped,  bool_or(shipped_qty  > 0) AS any_shipped
-                          FROM purchase_order_lines WHERE purchase_order_id = ?) q
+                          FROM ik_purchase_order_lines WHERE purchase_order_id = ?) q
                  WHERE p.id = ? AND p.status NOT IN ('SAP_PENDING','SAP_FAILED','CANCELLED','DECLINED')""", poId, poId);
     }
 }

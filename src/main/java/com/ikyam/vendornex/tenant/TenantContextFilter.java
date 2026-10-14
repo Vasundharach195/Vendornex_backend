@@ -20,10 +20,12 @@ public class TenantContextFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         TenantContext.clear();
+        ConnectionContext.clear();
         try {
             chain.doFilter(request, response);
         } finally {
             TenantContext.clear();
+            ConnectionContext.clear();
         }
     }
 }

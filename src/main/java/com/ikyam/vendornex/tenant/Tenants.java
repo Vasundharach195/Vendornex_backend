@@ -32,7 +32,7 @@ public final class Tenants {
     public static String schemaOf(UUID companyId) {
         String cached = SCHEMAS.get(companyId);
         if (cached != null) return cached;
-        String schema = Db.scalar("SELECT schema_id FROM companies WHERE id = ?", String.class, companyId);
+        String schema = Db.scalar("SELECT schema_id FROM ik_onboarding_company WHERE onboard_company_id = ?", String.class, companyId);
         if (schema == null) throw new IllegalStateException("Company " + companyId + " has no tenant schema");
         SCHEMAS.put(companyId, schema);
         return schema;
@@ -49,7 +49,7 @@ public final class Tenants {
     /** Runs {@code work} once per onboarded company, each inside that company's schema. One failing company never stops the rest. */
     public static void forEach(Consumer<UUID> work) {
         List<Row> companies = TenantContext.call(null,
-                () -> Db.query("SELECT id, schema_id FROM companies WHERE schema_id IS NOT NULL ORDER BY created_at"));
+                () -> Db.query("SELECT onboard_company_id AS id, schema_id FROM ik_onboarding_company WHERE schema_id IS NOT NULL ORDER BY created_at"));
         for (Row c : companies) {
             UUID id = c.uuid("id");
             try {
@@ -63,12 +63,12 @@ public final class Tenants {
     /**
      * Creates the next tenant schema (vnx_c00001, vnx_c00002, ...) with all tenant tables and
      * returns its name. Runs in the caller's transaction, so a failed onboarding leaves no
-     * half-built schema behind. The caller stores the name in companies.schema_id.
+     * half-built schema behind. The caller stores the name in ik_onboarding_company.schema_id.
      */
     public static String createSchema() {
         return Db.tx(() -> {
             long n = Db.scalar("SELECT nextval('ik_vendor.tenant_schema_seq')", Long.class);
-            String schema = String.format("vnx_c%05d", n);
+            String schema = String.format("ik_vnx_c%05d", n);
             Db.script("CREATE SCHEMA \"" + schema + "\"");
             String ddl = loadTenantDdl();
             TenantContext.run(schema, () -> Db.script(ddl));

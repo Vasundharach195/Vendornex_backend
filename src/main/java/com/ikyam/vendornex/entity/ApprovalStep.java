@@ -15,7 +15,7 @@ import java.util.UUID;
  * same narrow UPDATE the original {@code Db.exec} calls did, not a full-column rewrite.
  */
 @Entity
-@Table(name = "approval_steps")
+@Table(name = "ik_approval_steps")
 @DynamicUpdate
 public class ApprovalStep {
 

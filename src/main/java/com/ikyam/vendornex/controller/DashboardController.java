@@ -7,12 +7,15 @@ import com.ikyam.vendornex.security.CurrentUser;
 import com.ikyam.vendornex.security.Role;
 import com.ikyam.vendornex.web.Roles;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
 
 @RestController
+//@RequestMapping("vmsb1")
+
 public class DashboardController {
 
     private final DashboardQueries dashboardQueries;

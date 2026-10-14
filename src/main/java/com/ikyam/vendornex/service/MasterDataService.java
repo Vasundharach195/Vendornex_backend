@@ -54,6 +54,12 @@ public class MasterDataService {
                 .toList();
     }
 
+    public List<Row> branches() { return queries.branches(); }
+
+    public List<Row> states(String countryCode) { return queries.states(countryCode); }
+
+    public List<Row> countries() { return queries.countries(); }
+
     public List<Row> vendorGroups(UUID companyId) {
         return vendorGroups.findByIdCompanyIdOrderByGroupName(companyId).stream()
                 .map(g -> new Row().with("groupCode", g.getId().getGroupCode()).with("groupName", g.getGroupName()))

@@ -8,38 +8,26 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
-/** Maps {@code companies} (tenant root). See V1__init.sql for the authoritative schema. */
+/** Maps {@code ik_onboarding_company} (tenant root). See V1__init.sql for the authoritative schema. */
 @Entity
-@Table(name = "companies")
+@Table(name = "ik_onboarding_company")
 @DynamicUpdate
 public class Company {
 
     @Id
     @GeneratedValue
     @UuidGenerator
-    @Column(columnDefinition = "uuid")
+    @Column(name = "onboard_company_id", columnDefinition = "uuid")
     private UUID id;
 
-    @Column(nullable = false, length = 200)
+    @Column(name = "company_name", nullable = false, length = 200)
     private String name;
 
-    @Column(length = 100)
+    @Column(name = "industry_type", length = 255)
     private String industry;
 
     @Column(name = "integration_mode", nullable = false, length = 20)
     private String integrationMode = "MOCK";
-
-    @Column(name = "service_layer_base_url", length = 500)
-    private String serviceLayerBaseUrl;
-
-    @Column(name = "sap_company_db", length = 100)
-    private String sapCompanyDb;
-
-    @Column(name = "sl_username", length = 100)
-    private String slUsername;
-
-    @Column(name = "sl_password_enc", columnDefinition = "text")
-    private String slPasswordEnc;
 
     @Column(name = "sl_verify_tls", nullable = false)
     private boolean slVerifyTls = true;
@@ -58,9 +46,10 @@ public class Company {
 
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
+    
 
     /** Postgres schema holding this company's tables (vnx_c00001, ...). Set once at onboarding. */
-    @Column(name = "schema_id", length = 30, updatable = false)
+    @Column(name = "schema_id", nullable = false, length = 255, updatable = false)
     private String schemaId;
 
     @Column(name = "onboarded_on", nullable = false)
@@ -71,6 +60,66 @@ public class Company {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
+    
+    
+
+    // ---- onboarding sheet columns (see V1__init.sql) ----
+    @Column(name = "company_phone_no", nullable = false, length = 15)
+    private String companyPhoneNo;
+
+    @Column(name = "company_street", nullable = false, length = 255)
+    private String companyStreet;
+
+    @Column(name = "company_city", nullable = false, length = 255)
+    private String companyCity;
+
+    @Column(name = "company_state", nullable = false, length = 255)
+    private String companyState;
+
+    @Column(name = "company_zipcode", nullable = false, length = 6)
+    private String companyZipcode;
+
+    @Column(name = "company_website", nullable = false, length = 255)
+    private String companyWebsite;
+
+    @Column(name = "headoffice_location", nullable = false, length = 255)
+    private String headofficeLocation;
+
+    @Column(name = "company_gst", nullable = false, length = 50)
+    private String companyGst;
+
+    @Column(name = "registration_number", nullable = false, length = 50)
+    private String registrationNumber;
+
+    @Column(name = "user_name", nullable = false, length = 255)
+    private String userName;
+
+    @Column(name = "email", nullable = false, length = 100)
+    private String email;
+
+    @Column(name = "user_phone_no", nullable = false, length = 15)
+    private String userPhoneNo;
+
+    @Column(name = "is_approved", nullable = false)
+    private boolean approved;
+
+    @Column(name = "email_id", nullable = false, length = 100)
+    private String emailId;
+
+    /** AES-256-GCM ciphertext (Crypto.encrypt), never plaintext. */
+    @Column(name = "email_pwd", nullable = false, length = 100)
+    private String emailPwd;
+
+    @Column(name = "smtp_server", nullable = false, length = 100)
+    private String smtpServer;
+
+    @Column(name = "smtp_port", nullable = false, length = 4)
+    private String smtpPort;
+
+
+    /** Logo image bytes (Postgres bytea). Plain byte[] — @Lob would map to a large-object oid on Postgres. */
+    @Column(name = "company_logo", columnDefinition = "bytea")
+    private byte[] companyLogo;
 
     @PreUpdate
     void onUpdate() {
@@ -87,18 +136,6 @@ public class Company {
 
     public String getIntegrationMode() { return integrationMode; }
     public void setIntegrationMode(String integrationMode) { this.integrationMode = integrationMode; }
-
-    public String getServiceLayerBaseUrl() { return serviceLayerBaseUrl; }
-    public void setServiceLayerBaseUrl(String serviceLayerBaseUrl) { this.serviceLayerBaseUrl = serviceLayerBaseUrl; }
-
-    public String getSapCompanyDb() { return sapCompanyDb; }
-    public void setSapCompanyDb(String sapCompanyDb) { this.sapCompanyDb = sapCompanyDb; }
-
-    public String getSlUsername() { return slUsername; }
-    public void setSlUsername(String slUsername) { this.slUsername = slUsername; }
-
-    public String getSlPasswordEnc() { return slPasswordEnc; }
-    public void setSlPasswordEnc(String slPasswordEnc) { this.slPasswordEnc = slPasswordEnc; }
 
     public boolean isSlVerifyTls() { return slVerifyTls; }
     public void setSlVerifyTls(boolean slVerifyTls) { this.slVerifyTls = slVerifyTls; }
@@ -120,6 +157,65 @@ public class Company {
 
     public String getSchemaId() { return schemaId; }
     public void setSchemaId(String schemaId) { this.schemaId = schemaId; }
+    
+    
+
+    public String getCompanyPhoneNo() { return companyPhoneNo; }
+    public void setCompanyPhoneNo(String v) { this.companyPhoneNo = v; }
+
+    public String getCompanyStreet() { return companyStreet; }
+    public void setCompanyStreet(String v) { this.companyStreet = v; }
+
+    public String getCompanyCity() { return companyCity; }
+    public void setCompanyCity(String v) { this.companyCity = v; }
+
+    public String getCompanyState() { return companyState; }
+    public void setCompanyState(String v) { this.companyState = v; }
+
+    public String getCompanyZipcode() { return companyZipcode; }
+    public void setCompanyZipcode(String v) { this.companyZipcode = v; }
+
+    public String getCompanyWebsite() { return companyWebsite; }
+    public void setCompanyWebsite(String v) { this.companyWebsite = v; }
+
+    public String getHeadofficeLocation() { return headofficeLocation; }
+    public void setHeadofficeLocation(String v) { this.headofficeLocation = v; }
+
+    public String getCompanyGst() { return companyGst; }
+    public void setCompanyGst(String v) { this.companyGst = v; }
+
+    public String getRegistrationNumber() { return registrationNumber; }
+    public void setRegistrationNumber(String v) { this.registrationNumber = v; }
+
+    
+
+    public String getUserName() { return userName; }
+    public void setUserName(String v) { this.userName = v; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String v) { this.email = v; }
+
+    public String getUserPhoneNo() { return userPhoneNo; }
+    public void setUserPhoneNo(String v) { this.userPhoneNo = v; }
+
+    public boolean isApproved() { return approved; }
+    public void setApproved(boolean approved) { this.approved = approved; }
+
+    public String getEmailId() { return emailId; }
+    public void setEmailId(String v) { this.emailId = v; }
+
+    public String getEmailPwd() { return emailPwd; }
+    public void setEmailPwd(String v) { this.emailPwd = v; }
+
+    public String getSmtpServer() { return smtpServer; }
+    public void setSmtpServer(String v) { this.smtpServer = v; }
+
+    public String getSmtpPort() { return smtpPort; }
+    public void setSmtpPort(String v) { this.smtpPort = v; }
+
+    public byte[] getCompanyLogo() { return companyLogo; }
+    public void setCompanyLogo(byte[] v) { this.companyLogo = v; }
+
 
     public LocalDate getOnboardedOn() { return onboardedOn; }
 

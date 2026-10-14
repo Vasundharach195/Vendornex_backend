@@ -31,11 +31,11 @@ public class ApprovalQueries {
                                           WHEN 'REQUESTER' THEN COALESCE(ru.department, '') || ' · ' || ru.email
                                           ELSE pr.requester_name || ' · ' || COALESCE(pr.department, '') END AS subtitle,
                        COALESCE(v.created_at, ru.created_at, pr.created_at) AS submitted_at,
-                       (SELECT count(*) FROM approval_steps x WHERE x.entity_type = s.entity_type AND x.entity_id = s.entity_id AND x.round = s.round) AS total_stages
-                  FROM approval_steps s
-                  LEFT JOIN vendors v ON s.entity_type = 'VENDOR' AND v.id = s.entity_id
-                  LEFT JOIN users ru ON s.entity_type = 'REQUESTER' AND ru.id = s.entity_id
-                  LEFT JOIN purchase_requests pr ON s.entity_type = 'PURCHASE_REQUEST' AND pr.id = s.entity_id
+                       (SELECT count(*) FROM ik_approval_steps x WHERE x.entity_type = s.entity_type AND x.entity_id = s.entity_id AND x.round = s.round) AS total_stages
+                  FROM ik_approval_steps s
+                  LEFT JOIN ik_vendors v ON s.entity_type = 'VENDOR' AND v.id = s.entity_id
+                  LEFT JOIN ik_users ru ON s.entity_type = 'REQUESTER' AND ru.id = s.entity_id
+                  LEFT JOIN ik_purchase_requests pr ON s.entity_type = 'PURCHASE_REQUEST' AND pr.id = s.entity_id
                  WHERE s.company_id = ? AND s.status = 'PENDING' AND s.stage = ANY(?)
                  ORDER BY submitted_at""";
         return jdbc.query(sql, ps -> SqlBind.bind(ps.getConnection(), ps, new Object[]{companyId, stages}), GenericRowMapper.INSTANCE);
@@ -45,10 +45,10 @@ public class ApprovalQueries {
         String sql = """
                 SELECT s.id, s.entity_type, s.entity_id, s.stage, s.status, s.acted_at, s.remarks,
                        COALESCE(v.legal_name, ru.name, pr.pr_no) AS title
-                  FROM approval_steps s
-                  LEFT JOIN vendors v ON s.entity_type = 'VENDOR' AND v.id = s.entity_id
-                  LEFT JOIN users ru ON s.entity_type = 'REQUESTER' AND ru.id = s.entity_id
-                  LEFT JOIN purchase_requests pr ON s.entity_type = 'PURCHASE_REQUEST' AND pr.id = s.entity_id
+                  FROM ik_approval_steps s
+                  LEFT JOIN ik_vendors v ON s.entity_type = 'VENDOR' AND v.id = s.entity_id
+                  LEFT JOIN ik_users ru ON s.entity_type = 'REQUESTER' AND ru.id = s.entity_id
+                  LEFT JOIN ik_purchase_requests pr ON s.entity_type = 'PURCHASE_REQUEST' AND pr.id = s.entity_id
                  WHERE s.company_id = ? AND s.acted_by_user_id = ?
                  ORDER BY s.acted_at DESC LIMIT 100""";
         return jdbc.query(sql, ps -> SqlBind.bind(ps.getConnection(), ps, new Object[]{companyId, userId}), GenericRowMapper.INSTANCE);
@@ -57,9 +57,9 @@ public class ApprovalQueries {
     public List<Row> steps(String entityType, UUID entityId) {
         String sql = """
                 SELECT a.id, a.stage, a.seq, a.status, a.round, a.acted_at, a.remarks, u.name AS acted_by
-                  FROM approval_steps a LEFT JOIN users u ON u.id = a.acted_by_user_id
+                  FROM ik_approval_steps a LEFT JOIN ik_users u ON u.id = a.acted_by_user_id
                  WHERE a.entity_type = ? AND a.entity_id = ?
-                   AND a.round = (SELECT max(round) FROM approval_steps WHERE entity_type = ? AND entity_id = ?)
+                   AND a.round = (SELECT max(round) FROM ik_approval_steps WHERE entity_type = ? AND entity_id = ?)
                  ORDER BY a.seq""";
         return jdbc.query(sql, ps -> SqlBind.bind(ps.getConnection(), ps, new Object[]{entityType, entityId, entityType, entityId}), GenericRowMapper.INSTANCE);
     }

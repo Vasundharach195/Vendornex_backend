@@ -88,6 +88,22 @@ public final class AuthService {
                 new HashSet<>(u.strList("stages")), u.str("name"), u.str("email"));
     }
 
+    /**
+     * The SAP DB the user picked after login, sent as the X-SAP-Connection-Id header. It must be an active DB of the user's
+     * own company; the rest of the request then reads only that DB's masters. No header = the company's default DB.
+     */
+    public static void selectConnection(String header, CurrentUser user) {
+        if (header == null || header.isBlank() || user.companyId() == null) return;
+        UUID id;
+        try {
+            id = UUID.fromString(header.trim());
+        } catch (IllegalArgumentException e) {
+            throw ApiException.badRequest("X-SAP-Connection-Id must be a SAP connection id");
+        }
+        if (!queries.activeConnectionExists(id)) throw ApiException.badRequest("That SAP database is not available for your company");
+        com.ikyam.vendornex.tenant.ConnectionContext.set(id);
+    }
+
     /** Everything the frontend needs to build the shell for this user. */
     public static Row profile(UUID userId) {
         Row p = queries.findUserProfile(userId);

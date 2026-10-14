@@ -102,8 +102,10 @@ public class VendorService {
             throw ApiException.badRequest("Add at least a name or e-mail before saving");
         }
         Vendor v = new Vendor(companyId, f.legalName, userId);
-        vendors.saveAndFlush(v);   // flush now: f.write and findFullById below use JDBC and must see this row
+        vendors.saveAndFlush(v);
         f.write(v.getId(), req.wizardStep, queries);
+        System.out.println("==================create================");
+        System.out.println(v.getId());
         return queries.findFullById(v.getId());
     }
 
@@ -112,6 +114,9 @@ public class VendorService {
         Row v = editable(id, companyId);
         Fields f = Fields.from(req, companyId, queries);
         f.write(v.uuid("id"), req.wizardStep, queries);
+        System.out.println("---------------update---------------------");
+        System.out.println(v.uuid("id"));
+
         return queries.findFullById(v.uuid("id"));
     }
 

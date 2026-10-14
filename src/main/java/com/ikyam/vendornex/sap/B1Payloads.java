@@ -24,9 +24,9 @@ public final class B1Payloads {
     public static final int OBJ_PURCHASE_REQUEST = 1470000113;
     /** B1 object type of a Purchase Order, used as BaseType on GRPO lines. */
     public static final int OBJ_PURCHASE_ORDER = 22;
-
-    /** B1 branch (BPLId) sent on pushed Purchase Requests. Hard-coded until it becomes a company setting. */
+    
     public static final int DEFAULT_BRANCH_ID = 1;
+
 
     private B1Payloads() {}
 
@@ -59,7 +59,7 @@ public final class B1Payloads {
         putIf(addr, "City", v.str("city"));
         putIf(addr, "State", v.str("state"));
         putIf(addr, "ZipCode", v.str("zipCode"));
-        putIf(addr, "Country", v.str("country") == null ? (india ? "IN" : null) : v.str("country"));
+        putIf(addr, "Country", v.str("country"));
         if (india && v.str("gstin") != null) {
             addr.put("GSTIN", v.str("gstin"));
             addr.put("GstType", "gstRegularTDSISD");
@@ -85,7 +85,7 @@ public final class B1Payloads {
             b.put("AccountNo", v.str("bankAccountNo"));
             putIf(b, "BICSwiftCode", v.str("bankIfsc"));
             b.put("AccountName", trim(v.str("legalName"), 50));
-            b.put("Country", v.str("country") == null ? "IN" : v.str("country"));
+            putIf(b, "Country", v.str("country"));
             p.put("DefaultBankCode", v.str("sapBankCode"));
             p.put("DefaultAccount", v.str("bankAccountNo"));
         }
@@ -103,7 +103,9 @@ public final class B1Payloads {
             p.put("ReqType", 12);           // B1 user
             p.put("Requester", slUser == null ? "manager" : slUser);
         }
-        p.put("BPL_IDAssignedToInvoice", DEFAULT_BRANCH_ID); // OPRQ.BPLId — hard-coded branch for now
+      p.put("BPL_IDAssignedToInvoice", DEFAULT_BRANCH_ID); 
+      //  p.put("BPLID", DEFAULT_BRANCH_ID); 
+
         LocalDate req = pr.date("requiredDate");
         if (req != null) p.put("RequriedDate", req.toString()); // sic — Service Layer property name
         p.put("Comments", trim("VendorNex " + pr.str("prNo") + (pr.str("justification") == null ? "" : " | " + pr.str("justification")), 254));
@@ -127,7 +129,7 @@ public final class B1Payloads {
     public static ObjectNode purchaseOrder(Row po, List<Row> lines, Map<String, int[]> prBase, String ref) {
         ObjectNode p = Json.obj();
         p.put("CardCode", po.str("cardCode"));
-        p.put("BPL_IDAssignedToInvoice", DEFAULT_BRANCH_ID); // OPOR.BPLId — hard-coded branch for now
+        p.put("BPL_IDAssignedToInvoice", DEFAULT_BRANCH_ID); 
         p.put("DocDate", po.str("docDate"));
         p.put("DocDueDate", po.str("docDueDate"));
         p.put("Comments", trim("VendorNex " + ref + (po.str("remarks") == null ? "" : " | " + po.str("remarks")), 254));

@@ -80,9 +80,9 @@ public class ApprovalService {
      * static string-concatenation helper (no DB access of its own) — spliced as literal SQL text
      * into callers' own JdbcTemplate queries, never a bind parameter. */
     public static String summarySql(String entityType, String idColumn) {
-        return "(SELECT json_agg(json_build_object('stage', a.stage, 'status', a.status) ORDER BY a.seq) FROM approval_steps a " +
+        return "(SELECT json_agg(json_build_object('stage', a.stage, 'status', a.status) ORDER BY a.seq) FROM ik_approval_steps a " +
                 "WHERE a.entity_type = '" + entityType + "' AND a.entity_id = " + idColumn +
-                " AND a.round = (SELECT max(round) FROM approval_steps b WHERE b.entity_type = '" + entityType + "' AND b.entity_id = " + idColumn + "))";
+                " AND a.round = (SELECT max(round) FROM ik_approval_steps b WHERE b.entity_type = '" + entityType + "' AND b.entity_id = " + idColumn + "))";
     }
 
     /** Final approval. Returns a sync transaction to run after commit, if the approval triggers a B1 write. */

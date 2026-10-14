@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**")
                 .allowedOrigins(AppConfig.get().corsOrigin)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .allowedHeaders("Authorization", "Content-Type", "X-File-Name")
+                .allowedHeaders("Authorization", "Content-Type", "X-File-Name", "X-SAP-Connection-Id")
                 .maxAge(3600);
     }
 

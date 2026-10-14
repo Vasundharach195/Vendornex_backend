@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,6 +27,8 @@ import jakarta.servlet.http.HttpServletRequest;
 
 /** Login, session validation, invitations. */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class AuthController {
 
     private final AuthQueries authQueries;
@@ -54,6 +57,9 @@ public class AuthController {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("token", AuthService.issueToken(u.uuid("id")));
         out.put("user", AuthService.profile(u.uuid("id")));
+        // The SAP databases of the user's company, for the DB selector. Vendors and the Super Admin get an empty list.
+        boolean companyUser = u.get("companyId") != null && !"VENDOR".equals(u.str("role"));
+        out.put("sapConnections", companyUser ? authQueries.sapConnections(u.str("schemaId")) : java.util.List.of());
         return out;
     }
 

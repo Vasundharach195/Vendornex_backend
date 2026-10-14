@@ -10,7 +10,7 @@ import java.time.Instant;
 
 /** Maps {@code sap_tax_codes} (VatGroups/OSTC mirror). */
 @Entity
-@Table(name = "sap_tax_codes")
+@Table(name = "ik_sap_tax_codes")
 public class SapTaxCode {
 
     @EmbeddedId
@@ -21,9 +21,6 @@ public class SapTaxCode {
 
     @Column(precision = 9, scale = 4)
     private BigDecimal rate;
-
-    @Column(name = "last_synced_at", nullable = false)
-    private Instant lastSyncedAt = Instant.now();
 
     protected SapTaxCode() {}
 

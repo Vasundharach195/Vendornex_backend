@@ -192,6 +192,30 @@ public final class Db {
         });
     }
 
+    /** Like {@link #batch} but returns how many rows were actually written (an upsert whose WHERE skipped a row counts 0). */
+    public static int batchCount(String sql, List<Object[]> paramSets) {
+        if (paramSets.isEmpty()) return 0;
+        return withConn(c -> {
+            int total = 0;
+            try (PreparedStatement ps = c.prepareStatement(sql)) {
+                int n = 0;
+                for (Object[] p : paramSets) {
+                    bind(c, ps, p);
+                    ps.addBatch();
+                    if (++n % 500 == 0) total += written(ps.executeBatch());
+                }
+                total += written(ps.executeBatch());
+            }
+            return total;
+        });
+    }
+
+    private static int written(int[] counts) {
+        int t = 0;
+        for (int x : counts) t += x == Statement.SUCCESS_NO_INFO ? 1 : Math.max(x, 0);
+        return t;
+    }
+
     // ------------------------------------------------------------------ internals
 
     @FunctionalInterface

@@ -118,7 +118,7 @@ public class UserService {
 
     public String reinvite(UUID id, UUID companyId) {
         User u = users.findByIdAndCompanyId(id, companyId).orElseThrow(() -> ApiException.notFound("User"));
-        if (!"INVITED".equals(u.getStatus())) throw ApiException.conflict("Only users who have not activated yet can be re-invited");
+        if (!"INVITED".equals(u.getStatus())) throw ApiException.conflict("Only ik_users who have not activated yet can be re-invited");
         return AuthService.issueInvite(u.getId());
     }
 

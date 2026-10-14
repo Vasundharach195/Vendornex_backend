@@ -11,7 +11,7 @@ import java.time.Instant;
 
 /** Maps {@code sap_items} (OITM mirror). */
 @Entity
-@Table(name = "sap_items")
+@Table(name = "ik_sap_items")
 @DynamicUpdate
 public class SapItem {
 
@@ -38,9 +38,6 @@ public class SapItem {
 
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
-
-    @Column(name = "last_synced_at", nullable = false)
-    private Instant lastSyncedAt = Instant.now();
 
     protected SapItem() {}
 

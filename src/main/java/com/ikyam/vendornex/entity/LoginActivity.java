@@ -14,7 +14,7 @@ import java.util.UUID;
  * the write side switches over.
  */
 @Entity
-@Table(name = "login_activity")
+@Table(name = "ik_login_activity")
 public class LoginActivity {
 
     @Id

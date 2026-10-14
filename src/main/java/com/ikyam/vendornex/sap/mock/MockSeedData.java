@@ -73,6 +73,20 @@ final class MockSeedData {
         tax.addObject().put("Code", "GST18").put("Name", "GST 18% (CGST+SGST)").put("Rate", 18);
         tax.addObject().put("Code", "IGST18").put("Name", "IGST 18% (inter-state)").put("Rate", 18);
 
+        // Country (/Counties: Code + Name), /States and /BusinessPlaces masters
+        ArrayNode cnt = db.putArray("Counties");
+        cnt.addObject().put("Code", "IN").put("Name", "India");
+        cnt.addObject().put("Code", "US").put("Name", "United States");
+        cnt.addObject().put("Code", "AE").put("Name", "United Arab Emirates");
+        ArrayNode st = db.putArray("States");
+        st.addObject().put("Code", "TN").put("Name", "Tamil Nadu").put("Country", "IN");
+        st.addObject().put("Code", "MH").put("Name", "Maharashtra").put("Country", "IN");
+        st.addObject().put("Code", "KA").put("Name", "Karnataka").put("Country", "IN");
+        st.addObject().put("Code", "NY").put("Name", "New York").put("Country", "US");
+        ArrayNode bp = db.putArray("BusinessPlaces");
+        bp.addObject().put("BPLID", 1).put("BPLName", "Head Office - Chennai").put("Disabled", "tNO");
+        bp.addObject().put("BPLID", 2).put("BPLName", "Pune Unit").put("Disabled", "tNO");
+
         db.putArray("VatGroups");
         ArrayNode prs = db.putArray("PurchaseRequests");
         pr(prs, 1, 5021, "Suresh Iyer", 3, "ITM-1030", "Copper Wire 4sq.mm", "MTR", 1000, "WH-01", 12);

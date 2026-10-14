@@ -31,6 +31,8 @@ import java.util.*;
  * (PurchaseDeliveryNotes, BaseType 22) after which the draft is removed.
  */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class PurchaseOrderController {
 
     private final PurchaseRequestService purchaseRequestService;
@@ -44,9 +46,9 @@ public class PurchaseOrderController {
     private static final String LIST = """
             SELECT po.id, po.sap_doc_num, po.source, po.doc_date, po.doc_due_date, po.status, po.doc_total, po.currency,
                    po.acknowledged_at, v.id AS vendor_id, v.legal_name AS vendor_name, po.card_code, r.rfq_no,
-                   (SELECT count(*) FROM purchase_order_lines l WHERE l.purchase_order_id = po.id) AS line_count,
-                   (SELECT count(*) FROM grpos g WHERE g.purchase_order_id = po.id AND g.status IN ('DRAFT_CREATED','DRAFT_FAILED','POST_FAILED')) AS grpo_pending
-              FROM purchase_orders po JOIN vendors v ON v.id = po.vendor_id LEFT JOIN rfqs r ON r.id = po.rfq_id
+                   (SELECT count(*) FROM ik_purchase_order_lines l WHERE l.purchase_order_id = po.id) AS line_count,
+                   (SELECT count(*) FROM ik_grpos g WHERE g.purchase_order_id = po.id AND g.status IN ('DRAFT_CREATED','DRAFT_FAILED','POST_FAILED')) AS grpo_pending
+              FROM ik_purchase_orders po JOIN ik_vendors v ON v.id = po.vendor_id LEFT JOIN ik_rfqs r ON r.id = po.rfq_id
             """;
 
     @GetMapping("/api/purchase-orders")
@@ -82,22 +84,22 @@ public class PurchaseOrderController {
     public static Row detail(UUID c, UUID id, UUID vendorId) {
         Row po = Db.one(LIST + " WHERE po.id = ? AND po.company_id = ? AND (?::uuid IS NULL OR po.vendor_id = ?)", id, c, vendorId, vendorId);
         if (po == null || (vendorId != null && Set.of("SAP_PENDING", "SAP_FAILED").contains(po.str("status")))) throw ApiException.notFound("Purchase order");
-        Row full = Db.one("SELECT remarks, ack_remarks FROM purchase_orders WHERE id = ?", id);
+        Row full = Db.one("SELECT remarks, ack_remarks FROM ik_purchase_orders WHERE id = ?", id);
         po.putAll(full);
         po.put("lines", Db.query("""
                 SELECT l.id, l.line_num, l.item_code, l.item_name, l.uom, l.quantity, l.unit_price, l.warehouse_code, w.warehouse_name,
                        l.tax_code, l.ship_date, l.shipped_qty, l.received_qty, l.quantity - l.shipped_qty AS open_to_ship
-                  FROM purchase_order_lines l LEFT JOIN sap_warehouses w ON w.company_id = ? AND w.warehouse_code = l.warehouse_code
+                  FROM ik_purchase_order_lines l LEFT JOIN ik_sap_warehouses w ON w.company_id = ? AND w.connection_id = ik_default_connection() AND w.warehouse_code = l.warehouse_code
                  WHERE l.purchase_order_id = ? ORDER BY l.line_num""", c, id));
         List<Row> asns = Db.query("""
                 SELECT a.*, g.id AS grpo_id, g.status AS grpo_status, g.sap_draft_entry, g.sap_doc_num AS grpo_doc_num, g.confirmed_at
-                  FROM asns a LEFT JOIN grpos g ON g.asn_id = a.id WHERE a.purchase_order_id = ? ORDER BY a.submitted_at""", id);
+                  FROM ik_asns a LEFT JOIN ik_grpos g ON g.asn_id = a.id WHERE a.purchase_order_id = ? ORDER BY a.submitted_at""", id);
         for (Row a : asns) {
             a.put("lines", Db.query("""
                     SELECT al.po_line_id, al.shipped_qty, al.batch_no, pl.item_code, pl.item_name, pl.uom, pl.warehouse_code,
                            gl.received_qty, gl.rejected_qty, gl.warehouse_code AS received_warehouse
-                      FROM asn_lines al JOIN purchase_order_lines pl ON pl.id = al.po_line_id
-                      LEFT JOIN grpos g ON g.asn_id = al.asn_id LEFT JOIN grpo_lines gl ON gl.grpo_id = g.id AND gl.po_line_id = al.po_line_id
+                      FROM ik_asn_lines al JOIN ik_purchase_order_lines pl ON pl.id = al.po_line_id
+                      LEFT JOIN ik_grpos g ON g.asn_id = al.asn_id LEFT JOIN ik_grpo_lines gl ON gl.grpo_id = g.id AND gl.po_line_id = al.po_line_id
                      WHERE al.asn_id = ? ORDER BY pl.line_num""", a.uuid("id")));
         }
         po.put("asns", asns);
@@ -129,8 +131,8 @@ public class PurchaseOrderController {
         for (JsonNode l : Json.reqArray(b, "lines")) {
             UUID prLine = Json.reqUuid(l, "prLineId");
             Row pl = Db.one("""
-                    SELECT l.item_code, l.warehouse_code, l.required_date FROM purchase_request_lines l
-                      JOIN purchase_requests p ON p.id = l.purchase_request_id WHERE l.id = ? AND p.company_id = ?""", prLine, c);
+                    SELECT l.item_code, l.warehouse_code, l.required_date FROM ik_purchase_request_lines l
+                      JOIN ik_purchase_requests p ON p.id = l.purchase_request_id WHERE l.id = ? AND p.company_id = ?""", prLine, c);
             if (pl == null) throw ApiException.badRequest("PR line not found");
             lines.add(new LineIn(pl.str("itemCode"), Json.reqPositive(l, "quantity"), Json.reqDec(l, "unitPrice"),
                     Optional.ofNullable(Json.optText(l, "warehouseCode")).orElse(pl.str("warehouseCode")), Json.optText(l, "taxCode"),
@@ -146,45 +148,47 @@ public class PurchaseOrderController {
         Set<UUID> prs = new HashSet<>();
         UUID[] out = new UUID[2];
         Db.txv(() -> {
-            Row v = Db.one("SELECT legal_name, status, sap_card_code, sap_bp_status FROM vendors WHERE id = ? AND company_id = ?", vendorId, c);
+            Row v = Db.one("SELECT legal_name, status, sap_card_code, sap_bp_status FROM ik_vendors WHERE id = ? AND company_id = ?", vendorId, c);
             if (v == null) throw ApiException.badRequest("Vendor not found");
             if (!"ACTIVE".equals(v.str("status")) || v.str("sapCardCode") == null) throw ApiException.badRequest(v.str("legalName") + " is not an active vendor with a B1 code");
             if ("INACTIVE".equals(v.str("sapBpStatus"))) {
                 throw ApiException.conflict(v.str("legalName") + " (" + v.str("sapCardCode") + ") is Inactive in SAP B1 — activate the Business Partner in B1 first");
             }
             UUID poId = Db.scalar("""
-                    INSERT INTO purchase_orders(company_id, vendor_id, card_code, source, doc_due_date, currency, remarks, created_by_user_id, status)
+                    INSERT INTO ik_purchase_orders(company_id, vendor_id, card_code, source, doc_due_date, currency, remarks, created_by_user_id, status)
                     VALUES (?,?,?,?,?,?,?,?, 'SAP_PENDING') RETURNING id""", UUID.class, c, vendorId, v.str("sapCardCode"), source, due,
                     settings.str("currency"), remarks, u.userId());
             BigDecimal total = BigDecimal.ZERO;
             int n = 0;
             for (LineIn l : lines) {
-                Row it = Db.one("SELECT item_name, purchase_uom FROM sap_items WHERE company_id = ? AND item_code = ? AND is_active", c, l.itemCode());
+                Row it = Db.one("SELECT item_name, purchase_uom FROM ik_sap_items WHERE company_id = ? AND connection_id = ik_default_connection() AND item_code = ? AND is_active", c, l.itemCode());
                 if (it == null) throw ApiException.badRequest("Line " + (n + 1) + ": item " + l.itemCode() + " is not an active purchase item in SAP B1");
                 if (l.price().signum() < 0) throw ApiException.badRequest("Line " + (n + 1) + ": price cannot be negative");
                 String wh = l.wh() != null ? l.wh() : settings.str("defaultWarehouseCode");
-                if (wh == null || Db.scalar("SELECT 1 FROM sap_warehouses WHERE company_id = ? AND warehouse_code = ? AND is_active", Integer.class, c, wh) == null) {
+                if (wh == null || Db.scalar("SELECT 1 FROM ik_sap_warehouses WHERE company_id = ? AND connection_id = ik_default_connection() AND warehouse_code = ? AND is_active", Integer.class, c, wh) == null) {
                     throw ApiException.badRequest("Line " + (n + 1) + ": choose a valid SAP B1 warehouse");
                 }
                 String tax = l.tax() != null ? l.tax() : settings.str("defaultTaxCode");
-                if (tax != null && Db.scalar("SELECT 1 FROM sap_tax_codes WHERE company_id = ? AND tax_code = ?", Integer.class, c, tax) == null) {
+                if (tax != null && Db.scalar("SELECT 1 FROM ik_sap_tax_codes WHERE company_id = ? AND connection_id = ik_default_connection() AND tax_code = ?", Integer.class, c, tax) == null) {
                     throw ApiException.badRequest("Line " + (n + 1) + ": tax code " + tax + " not found in SAP B1");
                 }
                 if (l.prLineId() != null) prs.add(RfqController.consumePrLine(c, l.prLineId(), l.itemCode(), l.qty()));
                 Db.exec("""
-                        INSERT INTO purchase_order_lines(purchase_order_id, line_num, item_code, item_name, uom, quantity, unit_price, warehouse_code,
+                        INSERT INTO ik_purchase_order_lines(purchase_order_id, line_num, item_code, item_name, uom, quantity, unit_price, warehouse_code,
                                tax_code, ship_date, base_pr_line_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                         poId, n++, l.itemCode(), it.str("itemName"), it.str("purchaseUom"), l.qty(), l.price(), wh, tax,
                         l.shipDate() == null ? due : l.shipDate(), l.prLineId());
                 total = total.add(l.qty().multiply(l.price()));
             }
-            Db.exec("UPDATE purchase_orders SET doc_total = ? WHERE id = ?", total, poId);
+            Db.exec("UPDATE ik_purchase_orders SET doc_total = ? WHERE id = ?", total, poId);
             out[0] = poId;
             out[1] = SyncService.enqueue(c, "CREATE_PURCHASE_ORDER", poId, u.userId());
         });
         prs.forEach(purchaseRequestService::recomputeSourcing);
         Row sync = SyncService.processNow(out[1]);
+     //   return detail(c, out[0], null).with("sapSyncResult", sync);
         return detail(c, out[0], null).with("sapSyncResult", sync).with("sapPayload", SyncService.payloadOf(out[1]));
+
     }
 
     @PostMapping("/api/purchase-orders/{id}/retry-sap")
@@ -192,7 +196,7 @@ public class PurchaseOrderController {
     public Object retry(@PathVariable String id, CurrentUser u) {
         UUID c = u.company();
         UUID poId = Ids.uuid(id);
-        Row po = Db.one("SELECT id, status FROM purchase_orders WHERE id = ? AND company_id = ?", poId, c);
+        Row po = Db.one("SELECT id, status FROM ik_purchase_orders WHERE id = ? AND company_id = ?", poId, c);
         if (po == null) throw ApiException.notFound("Purchase order");
         if (!"SAP_FAILED".equals(po.str("status"))) throw ApiException.conflict("PO is not in a failed state");
         SyncService.retry(c, SyncService.latestFor("PURCHASE_ORDER", poId).uuid("id"));
@@ -207,30 +211,30 @@ public class PurchaseOrderController {
         UUID poId = Ids.uuid(id);
         Set<UUID> prs = new HashSet<>();
         Db.txv(() -> {
-            Row po = Db.one("SELECT id, status, rfq_id FROM purchase_orders WHERE id = ? AND company_id = ? FOR UPDATE", poId, c);
+            Row po = Db.one("SELECT id, status, rfq_id FROM ik_purchase_orders WHERE id = ? AND company_id = ? FOR UPDATE", poId, c);
             if (po == null) throw ApiException.notFound("Purchase order");
             if (!"SAP_FAILED".equals(po.str("status"))) throw ApiException.conflict("Only POs that failed to post to SAP B1 can be cancelled here — cancel B1 POs in SAP B1");
             for (Row l : Db.query("""
-                    SELECT l.base_pr_line_id, l.quantity, pl.purchase_request_id FROM purchase_order_lines l
-                      JOIN purchase_request_lines pl ON pl.id = l.base_pr_line_id WHERE l.purchase_order_id = ? AND ? = 'PR'""",
-                    poId, Db.scalar("SELECT source FROM purchase_orders WHERE id = ?", String.class, poId))) {
-                Db.exec("UPDATE purchase_request_lines SET sourced_qty = GREATEST(0, sourced_qty - ?) WHERE id = ?", l.dec("quantity"), l.uuid("basePrLineId"));
+                    SELECT l.base_pr_line_id, l.quantity, pl.purchase_request_id FROM ik_purchase_order_lines l
+                      JOIN ik_purchase_request_lines pl ON pl.id = l.base_pr_line_id WHERE l.purchase_order_id = ? AND ? = 'PR'""",
+                    poId, Db.scalar("SELECT source FROM ik_purchase_orders WHERE id = ?", String.class, poId))) {
+                Db.exec("UPDATE ik_purchase_request_lines SET sourced_qty = GREATEST(0, sourced_qty - ?) WHERE id = ?", l.dec("quantity"), l.uuid("basePrLineId"));
                 prs.add(l.uuid("purchaseRequestId"));
             }
             if (po.get("rfqId") != null) {
-                for (Row a : Db.query("SELECT rfq_line_id, awarded_qty FROM rfq_awards WHERE purchase_order_id = ?", poId)) {
-                    Db.exec("UPDATE rfq_lines SET awarded_qty = GREATEST(0, awarded_qty - ?) WHERE id = ?", a.dec("awardedQty"), a.uuid("rfqLineId"));
+                for (Row a : Db.query("SELECT rfq_line_id, awarded_qty FROM ik_rfq_awards WHERE purchase_order_id = ?", poId)) {
+                    Db.exec("UPDATE ik_rfq_lines SET awarded_qty = GREATEST(0, awarded_qty - ?) WHERE id = ?", a.dec("awardedQty"), a.uuid("rfqLineId"));
                 }
-                Db.exec("UPDATE rfq_awards SET purchase_order_id = NULL WHERE purchase_order_id = ?", poId);
-                Db.exec("DELETE FROM rfq_awards WHERE purchase_order_id IS NULL AND rfq_id = ?", po.uuid("rfqId"));
+                Db.exec("UPDATE ik_rfq_awards SET purchase_order_id = NULL WHERE purchase_order_id = ?", poId);
+                Db.exec("DELETE FROM ik_rfq_awards WHERE purchase_order_id IS NULL AND rfq_id = ?", po.uuid("rfqId"));
                 Db.exec("""
-                        UPDATE rfqs SET status = CASE WHEN EXISTS (SELECT 1 FROM rfq_awards WHERE rfq_id = rfqs.id) THEN 'PARTIALLY_AWARDED' ELSE 'CLOSED' END
+                        UPDATE ik_rfqs SET status = CASE WHEN EXISTS (SELECT 1 FROM ik_rfq_awards WHERE rfq_id = ik_rfqs.id) THEN 'PARTIALLY_AWARDED' ELSE 'CLOSED' END
                          WHERE id = ?""", po.uuid("rfqId"));
             }
-            Db.exec("UPDATE purchase_orders SET status = 'CANCELLED', updated_at = now() WHERE id = ?", poId);
+            Db.exec("UPDATE ik_purchase_orders SET status = 'CANCELLED', updated_at = now() WHERE id = ?", poId);
             for (UUID pr : prs) {
                 Db.exec("""
-                        UPDATE purchase_requests p SET status = CASE WHEN EXISTS (SELECT 1 FROM purchase_request_lines l WHERE l.purchase_request_id = p.id AND l.sourced_qty > 0)
+                        UPDATE ik_purchase_requests p SET status = CASE WHEN EXISTS (SELECT 1 FROM ik_purchase_request_lines l WHERE l.purchase_request_id = p.id AND l.sourced_qty > 0)
                                THEN 'PARTIALLY_SOURCED' ELSE 'APPROVED' END WHERE p.id = ?""", pr);
             }
         });
@@ -247,11 +251,11 @@ public class PurchaseOrderController {
         String remarks = Json.optText(b, "remarks");
         if (!accept && remarks == null) throw ApiException.badRequest("Tell the buyer why you are declining this PO");
         Db.txv(() -> {
-            Row po = Db.one("SELECT id, status FROM purchase_orders WHERE id = ? AND company_id = ? AND vendor_id = ? FOR UPDATE", poId, u.company(), u.vendor());
+            Row po = Db.one("SELECT id, status FROM ik_purchase_orders WHERE id = ? AND company_id = ? AND vendor_id = ? FOR UPDATE", poId, u.company(), u.vendor());
             if (po == null) throw ApiException.notFound("Purchase order");
             if (!"PENDING_ACK".equals(po.str("status"))) throw ApiException.conflict("This PO has already been acknowledged");
             Db.exec("""
-                    UPDATE purchase_orders SET status = ?, acknowledged_at = now(), acknowledged_by_user_id = ?, ack_remarks = ?, updated_at = now()
+                    UPDATE ik_purchase_orders SET status = ?, acknowledged_at = now(), acknowledged_by_user_id = ?, ack_remarks = ?, updated_at = now()
                      WHERE id = ?""", accept ? "ACKNOWLEDGED" : "DECLINED", u.userId(), remarks, poId);
         });
         return detail(u.company(), poId, u.vendor());
@@ -308,7 +312,7 @@ public class PurchaseOrderController {
         Db.txv(() -> {
             // ---- 2. Lock the PO row (FOR UPDATE) so two ASNs for the same PO cannot over-ship at the same time.
             // The vendor_id filter makes sure a vendor can only ship against their own POs.
-            Row po = Db.one("SELECT * FROM purchase_orders WHERE id = ? AND company_id = ? AND vendor_id = ? FOR UPDATE", poId, c, u.vendor());
+            Row po = Db.one("SELECT * FROM ik_purchase_orders WHERE id = ? AND company_id = ? AND vendor_id = ? FOR UPDATE", poId, c, u.vendor());
             if (po == null) throw ApiException.notFound("Purchase order");
             // Shipping is allowed only after the vendor acknowledged the PO and while quantity is still open.
             // (PENDING_ACK, DECLINED, SHIPPED, COMPLETED, CANCELLED, SAP_* are all blocked.)
@@ -318,7 +322,7 @@ public class PurchaseOrderController {
 
             // ---- 3. Create the ASN header with the next company-wide ASN number (e.g. ASN-2026-0007).
             UUID asnId = Db.scalar("""
-                    INSERT INTO asns(company_id, purchase_order_id, asn_no, ship_date, expected_delivery, carrier, tracking_no, vendor_invoice_no,
+                    INSERT INTO ik_asns(company_id, purchase_order_id, asn_no, ship_date, expected_delivery, carrier, tracking_no, vendor_invoice_no,
                            cartons, pallets, total_weight, submitted_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""", UUID.class,
                     c, poId, DocNumbers.next(c, "ASN"), ship, expected, carrier, tracking, Json.optText(b, "vendorInvoiceNo"),
                     Json.optInt(b, "cartons"), Json.optInt(b, "pallets"), Json.optText(b, "totalWeight"), u.userId());
@@ -331,25 +335,25 @@ public class PurchaseOrderController {
                 if (qty == null || qty.signum() == 0) continue;
                 if (qty.signum() < 0) throw ApiException.badRequest("Shipped quantity cannot be negative");
                 // Lock the PO line too, and make sure it really belongs to this PO.
-                Row pl = Db.one("SELECT item_code, quantity, shipped_qty FROM purchase_order_lines WHERE id = ? AND purchase_order_id = ? FOR UPDATE", lineId, poId);
+                Row pl = Db.one("SELECT item_code, quantity, shipped_qty FROM ik_purchase_order_lines WHERE id = ? AND purchase_order_id = ? FOR UPDATE", lineId, poId);
                 if (pl == null) throw ApiException.badRequest("Line does not belong to this PO");
                 // Open to ship = ordered qty − already shipped on earlier ASNs. The vendor cannot ship more than that.
                 BigDecimal open = pl.dec("quantity").subtract(pl.dec("shippedQty"));
                 if (qty.compareTo(open) > 0) throw ApiException.badRequest(pl.str("itemCode") + ": only " + open.toPlainString() + " left to ship");
-                Db.exec("INSERT INTO asn_lines(asn_id, po_line_id, shipped_qty, batch_no) VALUES (?,?,?,?)", asnId, lineId, qty, Json.optText(l, "batchNo"));
+                Db.exec("INSERT INTO ik_asn_lines(asn_id, po_line_id, shipped_qty, batch_no) VALUES (?,?,?,?)", asnId, lineId, qty, Json.optText(l, "batchNo"));
                 // Running total of shipped qty on the PO line (drives PO status and the "left to ship" check above).
-                Db.exec("UPDATE purchase_order_lines SET shipped_qty = shipped_qty + ? WHERE id = ?", qty, lineId);
+                Db.exec("UPDATE ik_purchase_order_lines SET shipped_qty = shipped_qty + ? WHERE id = ?", qty, lineId);
                 any = true;
             }
             if (!any) throw ApiException.badRequest("Enter a shipped quantity for at least one line");
 
             // ---- 5. Create the GRPO (Goods Receipt PO) that the buyer will confirm when the goods arrive.
             // One GRPO per ASN. It starts as DRAFT_PENDING (default) until SAP creates the draft.
-            UUID grpoId = Db.scalar("INSERT INTO grpos(company_id, asn_id, purchase_order_id) VALUES (?,?,?) RETURNING id", UUID.class, c, asnId, poId);
+            UUID grpoId = Db.scalar("INSERT INTO ik_grpos(company_id, asn_id, purchase_order_id) VALUES (?,?,?) RETURNING id", UUID.class, c, asnId, poId);
             // GRPO lines are pre-filled from the ASN: asn_qty = what the vendor says they shipped,
             // received_qty = same value as a default (buyer edits it on confirm), warehouse = the PO line's warehouse.
-            for (Row al : Db.query("SELECT al.po_line_id, al.shipped_qty, pl.warehouse_code FROM asn_lines al JOIN purchase_order_lines pl ON pl.id = al.po_line_id WHERE al.asn_id = ?", asnId)) {
-                Db.exec("INSERT INTO grpo_lines(grpo_id, po_line_id, asn_qty, received_qty, warehouse_code) VALUES (?,?,?,?,?)",
+            for (Row al : Db.query("SELECT al.po_line_id, al.shipped_qty, pl.warehouse_code FROM ik_asn_lines al JOIN ik_purchase_order_lines pl ON pl.id = al.po_line_id WHERE al.asn_id = ?", asnId)) {
+                Db.exec("INSERT INTO ik_grpo_lines(grpo_id, po_line_id, asn_qty, received_qty, warehouse_code) VALUES (?,?,?,?,?)",
                         grpoId, al.uuid("poLineId"), al.dec("shippedQty"), al.dec("shippedQty"), al.str("warehouseCode"));
             }
 
@@ -383,8 +387,8 @@ public class PurchaseOrderController {
         return Db.query("""
                 SELECT g.id, g.status, g.sap_draft_entry, g.sap_doc_num, g.confirmed_at, g.created_at, a.asn_no, a.carrier, a.tracking_no,
                        a.expected_delivery, po.id AS purchase_order_id, po.sap_doc_num AS po_doc_num, v.legal_name AS vendor_name,
-                       (SELECT sum(gl.asn_qty) FROM grpo_lines gl WHERE gl.grpo_id = g.id) AS asn_qty
-                  FROM grpos g JOIN asns a ON a.id = g.asn_id JOIN purchase_orders po ON po.id = g.purchase_order_id JOIN vendors v ON v.id = po.vendor_id
+                       (SELECT sum(gl.asn_qty) FROM ik_grpo_lines gl WHERE gl.grpo_id = g.id) AS asn_qty
+                  FROM ik_grpos g JOIN ik_asns a ON a.id = g.asn_id JOIN ik_purchase_orders po ON po.id = g.purchase_order_id JOIN ik_vendors v ON v.id = po.vendor_id
                  WHERE g.company_id = ? AND (?::text IS NULL OR g.status = ?)
                  ORDER BY g.created_at DESC LIMIT 300""", u.company(), st, st);
     }
@@ -425,7 +429,7 @@ public class PurchaseOrderController {
         LocalDate posting = Optional.ofNullable(Json.optDate(b, "postingDate")).orElse(LocalDate.now());
         UUID[] tx = new UUID[1];
         UUID poId = Db.tx(() -> {
-            Row g = Db.one("SELECT * FROM grpos WHERE id = ? AND company_id = ? FOR UPDATE", grpoId, c);
+            Row g = Db.one("SELECT * FROM ik_grpos WHERE id = ? AND company_id = ? FOR UPDATE", grpoId, c);
             if (g == null) throw ApiException.notFound("GRPO");
             if (!Set.of("DRAFT_CREATED", "DRAFT_FAILED").contains(g.str("status"))) {
                 throw ApiException.conflict("GRPO is " + g.str("status").toLowerCase().replace('_', ' '));
@@ -434,7 +438,7 @@ public class PurchaseOrderController {
             for (JsonNode l : Json.optArray(b, "lines")) {
                 UUID lineId = Json.reqUuid(l, "poLineId");
                 Row gl = Db.one("""
-                        SELECT gl.id, gl.asn_qty, pl.item_code, pl.quantity, pl.received_qty FROM grpo_lines gl JOIN purchase_order_lines pl ON pl.id = gl.po_line_id
+                        SELECT gl.id, gl.asn_qty, pl.item_code, pl.quantity, pl.received_qty FROM ik_grpo_lines gl JOIN ik_purchase_order_lines pl ON pl.id = gl.po_line_id
                          WHERE gl.grpo_id = ? AND gl.po_line_id = ?""", grpoId, lineId);
                 if (gl == null) throw ApiException.badRequest("Line is not part of this receipt");
                 BigDecimal received = Json.reqDec(l, "receivedQty");
@@ -445,21 +449,21 @@ public class PurchaseOrderController {
                     throw ApiException.badRequest(gl.str("itemCode") + ": accepting " + received.toPlainString() + " exceeds the " + openToReceive.toPlainString() + " still open on the PO");
                 }
                 String wh = Optional.ofNullable(Json.optText(l, "warehouseCode")).orElse(null);
-                if (wh != null && Db.scalar("SELECT 1 FROM sap_warehouses WHERE company_id = ? AND warehouse_code = ?", Integer.class, c, wh) == null) {
+                if (wh != null && Db.scalar("SELECT 1 FROM ik_sap_warehouses WHERE company_id = ? AND connection_id = ik_default_connection() AND warehouse_code = ?", Integer.class, c, wh) == null) {
                     throw ApiException.badRequest("Warehouse " + wh + " not found in SAP B1");
                 }
-                Db.exec("UPDATE grpo_lines SET received_qty = ?, rejected_qty = ?, warehouse_code = COALESCE(?, warehouse_code) WHERE id = ?",
+                Db.exec("UPDATE ik_grpo_lines SET received_qty = ?, rejected_qty = ?, warehouse_code = COALESCE(?, warehouse_code) WHERE id = ?",
                         received, rejected, wh, gl.uuid("id"));
                 total = total.add(received);
             }
-            BigDecimal sum = Db.scalar("SELECT COALESCE(sum(received_qty), 0) FROM grpo_lines WHERE grpo_id = ?", BigDecimal.class, grpoId);
+            BigDecimal sum = Db.scalar("SELECT COALESCE(sum(received_qty), 0) FROM ik_grpo_lines WHERE grpo_id = ?", BigDecimal.class, grpoId);
             if (sum.signum() <= 0) throw ApiException.badRequest("Nothing to receive — enter an accepted quantity on at least one line");
-            Db.exec("UPDATE grpos SET status = 'POSTING', posting_date = ?, confirmed_by_user_id = ?, confirmed_at = now() WHERE id = ?",
+            Db.exec("UPDATE ik_grpos SET status = 'POSTING', posting_date = ?, confirmed_by_user_id = ?, confirmed_at = now() WHERE id = ?",
                     posting, u.userId(), grpoId);
             // Quantity the vendor shipped but the buyer did not accept goes back to "open to ship".
             Db.exec("""
-                    UPDATE purchase_order_lines pl SET shipped_qty = GREATEST(0, pl.shipped_qty - (gl.asn_qty - gl.received_qty))
-                      FROM grpo_lines gl WHERE gl.grpo_id = ? AND gl.po_line_id = pl.id AND gl.asn_qty > gl.received_qty""", grpoId);
+                    UPDATE ik_purchase_order_lines pl SET shipped_qty = GREATEST(0, pl.shipped_qty - (gl.asn_qty - gl.received_qty))
+                      FROM ik_grpo_lines gl WHERE gl.grpo_id = ? AND gl.po_line_id = pl.id AND gl.asn_qty > gl.received_qty""", grpoId);
             tx[0] = SyncService.enqueue(c, "POST_GRPO", grpoId, u.userId());
             return g.uuid("purchaseOrderId");
         });
@@ -477,7 +481,7 @@ public class PurchaseOrderController {
     public Object retryGrpo(@PathVariable String id, CurrentUser u) {
         UUID c = u.company();
         UUID grpoId = Ids.uuid(id);
-        Row g = Db.one("SELECT id, status, purchase_order_id FROM grpos WHERE id = ? AND company_id = ?", grpoId, c);
+        Row g = Db.one("SELECT id, status, purchase_order_id FROM ik_grpos WHERE id = ? AND company_id = ?", grpoId, c);
         if (g == null) throw ApiException.notFound("GRPO");
         Row last = SyncService.latestFor("GRPO", grpoId);
         if (last == null || !"FAILED".equals(last.str("status"))) throw ApiException.conflict("Nothing to retry");

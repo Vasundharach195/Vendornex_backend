@@ -65,6 +65,8 @@ public class TenantRoutingDataSource extends DelegatingDataSource {
         private boolean autoCommit = true;
         /** search_path set in the transaction currently open on {@code real}; null once it ends. */
         private String appliedPath;
+        /** app.connection_id set in the transaction currently open on {@code real}; null if none. */
+        private String appliedConn;
 
         ConnectionHandler(Connection real) {
             this.real = real;
@@ -98,6 +100,7 @@ public class TenantRoutingDataSource extends DelegatingDataSource {
                         return null;
                     }
                     appliedPath = null; // a savepoint rollback may have undone the SET LOCAL
+                    appliedConn = null;
                     return TenantRoutingDataSource.invoke(real, method, args);
                 case "close":
                     if (real.isClosed()) return null;
@@ -119,6 +122,7 @@ public class TenantRoutingDataSource extends DelegatingDataSource {
 
         private void endTransaction(boolean commit) throws SQLException {
             appliedPath = null;
+            appliedConn = null;
             if (commit) real.commit();
             else real.rollback();
         }
@@ -126,11 +130,16 @@ public class TenantRoutingDataSource extends DelegatingDataSource {
         /** Issues SET LOCAL when a new transaction starts or the thread switched company. */
         void applyPath() throws SQLException {
             String wanted = TenantContext.searchPath();
-            if (wanted.equals(appliedPath)) return;
+            java.util.UUID conn = ConnectionContext.get();
+            String connKey = conn == null ? null : conn.toString();
+            if (wanted.equals(appliedPath) && java.util.Objects.equals(connKey, appliedConn)) return;
             try (Statement st = real.createStatement()) {
-                st.execute("SET LOCAL search_path TO " + wanted);
+                if (!wanted.equals(appliedPath)) st.execute("SET LOCAL search_path TO " + wanted);
+                // the SAP DB the user picked (read by ik_default_connection()); the value is a UUID, so it is safe to inline
+                if (connKey != null || appliedConn != null) st.execute("SET LOCAL app.connection_id = '" + (connKey == null ? "" : connKey) + "'");
             }
             appliedPath = wanted;
+            appliedConn = connKey;
         }
 
         private Statement wrapStatement(Statement st) {

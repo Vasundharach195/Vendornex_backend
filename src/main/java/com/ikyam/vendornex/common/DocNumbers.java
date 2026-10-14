@@ -15,8 +15,8 @@ public final class DocNumbers {
 
     public static String next(UUID companyId, String docType) {
         Row r = Db.one("""
-                INSERT INTO doc_sequences(company_id, doc_type, prefix, next_value) VALUES (?, ?, ?, 2)
-                ON CONFLICT (company_id, doc_type) DO UPDATE SET next_value = doc_sequences.next_value + 1
+                INSERT INTO ik_doc_sequences(company_id, doc_type, prefix, next_value) VALUES (?, ?, ?, 2)
+                ON CONFLICT (company_id, doc_type) DO UPDATE SET next_value = ik_doc_sequences.next_value + 1
                 RETURNING prefix, next_value - 1 AS value""", companyId, docType, docType + "-" + Year.now() + "-");
         return r.str("prefix") + String.format("%04d", r.integer("value"));
     }

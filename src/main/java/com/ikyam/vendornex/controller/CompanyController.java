@@ -5,6 +5,7 @@ import com.ikyam.vendornex.dto.SetCompanyStatusRequest;
 import com.ikyam.vendornex.dto.TestConnectionRequest;
 import com.ikyam.vendornex.dto.UpdateCompanyRequest;
 import com.ikyam.vendornex.http.ApiException;
+import com.ikyam.vendornex.security.CurrentUser;
 import com.ikyam.vendornex.security.Role;
 import com.ikyam.vendornex.service.CompanyService;
 import com.ikyam.vendornex.web.Ids;
@@ -17,6 +18,8 @@ import java.util.UUID;
 
 /** Ikyam Super Admin: onboarding customer companies and their SAP B1 Service Layer connection. */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class CompanyController {
 
     private final CompanyService service;
@@ -39,14 +42,13 @@ public class CompanyController {
 
     @PostMapping("/api/sa/companies")
     @Roles(Role.SUPER_ADMIN)
-    public Object create(@RequestBody CreateCompanyRequest req) {
-        UUID id = service.create(req);
+    public Object create(@RequestBody CreateCompanyRequest req, CurrentUser me) {
+        UUID id = service.create(req, me.userId());
         
         
        return service.afterCreate(id);
 		//return id;
     }
-
     @PutMapping("/api/sa/companies/{id}")
     @Roles(Role.SUPER_ADMIN)
     public Object update(@PathVariable String id, @RequestBody UpdateCompanyRequest req) {

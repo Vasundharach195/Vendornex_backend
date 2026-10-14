@@ -16,7 +16,7 @@ import java.util.UUID;
  * {@code JdbcTemplate}+{@code SqlBind}, not entity dirty-checking — see {@code SettingsQueries}.
  */
 @Entity
-@Table(name = "company_settings")
+@Table(name = "ik_company_settings")
 public class CompanySettings {
 
     @Id

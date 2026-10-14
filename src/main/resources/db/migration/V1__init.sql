@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Ikyam VendorNex — PostgreSQL schema (V1, initial)
 --
---   ik_vendor           control schema: companies, company_settings, global_users (login /
+--   ik_vendor           control schema: ik_onboarding_company, company_settings, global_users (login /
 --                       invite / activation), login_activity, jwt_tokens (SUPER_ADMIN tokens
 --                       only), b1_sessions, schema_migrations
 --   <tenant schema>     every other table, created per company at onboarding from
@@ -14,26 +14,41 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS ik_vendor;
 
 -- ---------------------------------------------------------------------
--- 1. companies — App-owned (tenant root)
+-- 1. ik_onboarding_company — App-owned (tenant root)
 -- ---------------------------------------------------------------------
-CREATE TABLE ik_vendor.companies (
-    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    schema_id                   VARCHAR(30) UNIQUE,           -- this company's Postgres schema
-    name                        VARCHAR(200) NOT NULL,
-    industry                    VARCHAR(100),
+CREATE TABLE ik_vendor.ik_onboarding_company (
+    onboard_company_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    schema_id                   VARCHAR(255) NOT NULL UNIQUE,  -- this company's Postgres schema
+    company_name                VARCHAR(200) NOT NULL,
+    industry_type               VARCHAR(255),
     integration_mode            VARCHAR(20)  NOT NULL DEFAULT 'MOCK'
                                 CHECK (integration_mode IN ('MOCK','SERVICE_LAYER')),
-    service_layer_base_url      VARCHAR(500),
-    sap_company_db              VARCHAR(100),
-    sl_username                 VARCHAR(100),
-    sl_password_enc             TEXT,           -- AES-256-GCM, never plaintext
-    sl_verify_tls               BOOLEAN NOT NULL DEFAULT TRUE,
+    -- SAP B1 company DBs (Service Layer URL, CompanyDB, user, password) live in ik_sap_connection (tenant schema)
+    sl_verify_tls              BOOLEAN NOT NULL DEFAULT TRUE,
     connection_status           VARCHAR(20)  NOT NULL DEFAULT 'NOT_TESTED'
                                 CHECK (connection_status IN ('NOT_TESTED','OK','FAILED')),
     connection_message          VARCHAR(1000),
     sap_b1_version              VARCHAR(50),
     last_tested_at              TIMESTAMPTZ,
     is_active                   BOOLEAN NOT NULL DEFAULT TRUE,
+    company_phone_no            VARCHAR(15)  NOT NULL,
+    company_street              VARCHAR(255) NOT NULL,
+    company_city                VARCHAR(255) NOT NULL,
+    company_state               VARCHAR(255) NOT NULL,
+    company_zipcode             VARCHAR(6)   NOT NULL,
+    company_website             VARCHAR(255) NOT NULL,
+    headoffice_location         VARCHAR(255) NOT NULL,
+    company_gst                 VARCHAR(50)  NOT NULL,
+    registration_number         VARCHAR(50)  NOT NULL,
+    user_name                   VARCHAR(255) NOT NULL,     -- onboarding contact / first admin
+    email                       VARCHAR(100) NOT NULL,     -- onboarding contact / first admin e-mail
+    user_phone_no              VARCHAR(15)  NOT NULL,
+    is_approved                 BOOLEAN NOT NULL DEFAULT FALSE,
+    email_id                    VARCHAR(100) NOT NULL,     -- customer mailbox used to send mail
+    email_pwd                   VARCHAR(100) NOT NULL,     -- AES-256-GCM, never plaintext
+    smtp_server                 VARCHAR(100) NOT NULL,
+    smtp_port                   VARCHAR(4)   NOT NULL,
+    company_logo                BYTEA,                     -- logo image bytes
     onboarded_on                DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -43,10 +58,10 @@ CREATE TABLE ik_vendor.companies (
 CREATE SEQUENCE ik_vendor.tenant_schema_seq;
 
 -- ---------------------------------------------------------------------
--- 2. company_settings — App-owned, 1:1 with companies
+-- 2. company_settings — App-owned, 1:1 with ik_onboarding_company
 -- ---------------------------------------------------------------------
-CREATE TABLE ik_vendor.company_settings (
-    company_id                  UUID PRIMARY KEY REFERENCES ik_vendor.companies(id) ON DELETE CASCADE,
+CREATE TABLE ik_vendor.ik_company_settings (
+    company_id                  UUID PRIMARY KEY REFERENCES ik_vendor.ik_onboarding_company(onboard_company_id) ON DELETE CASCADE,
     pr_mode                     VARCHAR(20) NOT NULL DEFAULT 'APP'
                                 CHECK (pr_mode IN ('APP','B1_SYNC')),
     push_pr_to_b1               BOOLEAN NOT NULL DEFAULT FALSE,
@@ -68,9 +83,9 @@ CREATE TABLE ik_vendor.company_settings (
 -- 3. global_users — the only table authentication reads. SUPER_ADMIN lives here only;
 --    company users are kept identical to each tenant's users table by the triggers below.
 -- ---------------------------------------------------------------------
-CREATE TABLE ik_vendor.global_users (
+CREATE TABLE ik_vendor.ik_global_users (
     id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id                  UUID REFERENCES ik_vendor.companies(id),   -- NULL only for SUPER_ADMIN
+    company_id                  UUID REFERENCES ik_vendor.ik_onboarding_company(onboard_company_id),   -- NULL only for SUPER_ADMIN
     name                        VARCHAR(150) NOT NULL,
     email                       VARCHAR(200) NOT NULL,
     password_hash               VARCHAR(100),                     -- bcrypt; NULL until invite accepted
@@ -90,45 +105,45 @@ CREATE TABLE ik_vendor.global_users (
     CONSTRAINT ck_global_users_company CHECK ((role = 'SUPER_ADMIN') = (company_id IS NULL)),
     CONSTRAINT ck_global_users_vendor  CHECK ((role = 'VENDOR') = (vendor_id IS NOT NULL))
 );
-CREATE UNIQUE INDEX ux_global_users_email ON ik_vendor.global_users(lower(email));
-CREATE UNIQUE INDEX ux_global_users_invite ON ik_vendor.global_users(invite_token) WHERE invite_token IS NOT NULL;
-CREATE INDEX ix_global_users_company_role ON ik_vendor.global_users(company_id, role);
+CREATE UNIQUE INDEX ux_global_users_email ON ik_vendor.ik_global_users(lower(email));
+CREATE UNIQUE INDEX ux_global_users_invite ON ik_vendor.ik_global_users(invite_token) WHERE invite_token IS NOT NULL;
+CREATE INDEX ix_global_users_company_role ON ik_vendor.ik_global_users(company_id, role);
 
 -- ---------------------------------------------------------------------
 -- 4. login_activity — App-owned (audit)
 -- ---------------------------------------------------------------------
-CREATE TABLE ik_vendor.login_activity (
+CREATE TABLE ik_vendor.ik_login_activity (
     id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id                     UUID REFERENCES ik_vendor.global_users(id),
-    company_id                  UUID REFERENCES ik_vendor.companies(id),
+    user_id                     UUID REFERENCES ik_vendor.ik_global_users(id),
+    company_id                  UUID REFERENCES ik_vendor.ik_onboarding_company(onboard_company_id),
     email                       VARCHAR(200),
     event                       VARCHAR(20) NOT NULL CHECK (event IN ('LOGIN','LOGIN_FAILED','LOGOUT','INVITE_ACCEPTED')),
     ip_address                  VARCHAR(64),
     user_agent                  VARCHAR(400),
     occurred_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_login_activity_company ON ik_vendor.login_activity(company_id, occurred_at DESC);
+CREATE INDEX ix_login_activity_company ON ik_vendor.ik_login_activity(company_id, occurred_at DESC);
 
 -- ---------------------------------------------------------------------
 -- 5. jwt_tokens — SUPER_ADMIN session tokens only (hash only, never the raw JWT).
 --    Every company user's tokens go to jwt_tokens in that company's tenant schema.
 -- ---------------------------------------------------------------------
-CREATE TABLE ik_vendor.jwt_tokens (
+CREATE TABLE ik_vendor.ik_jwt_tokens (
     id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id                     UUID NOT NULL REFERENCES ik_vendor.global_users(id) ON DELETE CASCADE,
+    user_id                     UUID NOT NULL REFERENCES ik_vendor.ik_global_users(id) ON DELETE CASCADE,
     role                        VARCHAR(20),
     token_hash                  VARCHAR(64) NOT NULL,
     issued_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at                  TIMESTAMPTZ
 );
-CREATE INDEX ix_jwt_tokens_user ON ik_vendor.jwt_tokens(user_id);
+CREATE INDEX ix_jwt_tokens_user ON ik_vendor.ik_jwt_tokens(user_id);
 
 -- ---------------------------------------------------------------------
 -- 6. b1_sessions — App-owned; SAP B1 Service Layer session per company.
 --    Table only for now: SapGatewayFactory still keeps sessions in memory.
 -- ---------------------------------------------------------------------
-CREATE TABLE ik_vendor.b1_sessions (
-    company_id                  UUID PRIMARY KEY REFERENCES ik_vendor.companies(id) ON DELETE CASCADE,
+CREATE TABLE ik_vendor.ik_b1_sessions (
+    company_id                  UUID PRIMARY KEY REFERENCES ik_vendor.ik_onboarding_company(onboard_company_id) ON DELETE CASCADE,
     schema_id                   VARCHAR(30),
     sap_username                VARCHAR(100),
     session_id                  TEXT,
@@ -137,6 +152,66 @@ CREATE TABLE ik_vendor.b1_sessions (
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------
+-- 6b. ik_config — App-owned, global (ik_vendor). Per-company mail (SMTP) settings.
+--     schema_id points at the company's tenant schema name.
+-- ---------------------------------------------------------------------
+CREATE TABLE ik_vendor.ik_config (
+    config_id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    schema_id                   VARCHAR(25) NOT NULL REFERENCES ik_vendor.ik_onboarding_company(schema_id),
+    email_id                    VARCHAR(100) NOT NULL,     -- customer mailbox used to send mail
+    email_pwd                   VARCHAR(100) NOT NULL,     -- AES-256-GCM, never plaintext
+    smtp_server                 VARCHAR(100) NOT NULL,
+    smtp_port                   VARCHAR(4)   NOT NULL,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by                  UUID NOT NULL REFERENCES ik_vendor.ik_global_users(id),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by                  UUID NOT NULL REFERENCES ik_vendor.ik_global_users(id)
+        );
+CREATE INDEX ix_ik_config_schema ON ik_vendor.ik_config(schema_id);
+
+-- ---------------------------------------------------------------------
+-- 6c. ik_role_master / ik_role_permission — App-owned, global (ik_vendor).
+--     Custom + system roles per company (schema_id) and what each role may do per module.
+-- ---------------------------------------------------------------------
+CREATE TABLE ik_vendor.ik_role_master (
+    role_id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    role_name                   VARCHAR(100) NOT NULL,
+    role_description            VARCHAR(500),
+    is_system_role              BOOLEAN NOT NULL DEFAULT FALSE,   -- pre-defined roles cannot be deleted
+    is_active                   BOOLEAN NOT NULL DEFAULT TRUE,    -- inactive roles cannot be assigned to new users
+    schema_id                   VARCHAR(25) NOT NULL REFERENCES ik_vendor.ik_onboarding_company(schema_id),
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by                  UUID NOT NULL REFERENCES ik_vendor.ik_global_users(id),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by                  UUID NOT NULL REFERENCES ik_vendor.ik_global_users(id),
+    ref1                        VARCHAR(255),
+    ref2                        VARCHAR(255),
+    CONSTRAINT ux_ik_role_master_name UNIQUE (schema_id, role_name)
+);
+
+CREATE TABLE ik_vendor.ik_role_permission (
+    permission_id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    role_id                     UUID NOT NULL REFERENCES ik_vendor.ik_role_master(role_id) ON DELETE CASCADE,
+    module_code                 VARCHAR(50) NOT NULL,
+    module_name                 VARCHAR(100) NOT NULL,
+    can_view                    BOOLEAN NOT NULL DEFAULT FALSE,
+    can_create                  BOOLEAN NOT NULL DEFAULT FALSE,
+    can_edit                    BOOLEAN NOT NULL DEFAULT FALSE,
+    can_delete                  BOOLEAN NOT NULL DEFAULT FALSE,
+    can_approve                 BOOLEAN NOT NULL DEFAULT FALSE,
+    can_export                  BOOLEAN NOT NULL DEFAULT FALSE,
+    can_import                  BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active                   BOOLEAN NOT NULL DEFAULT TRUE,
+    schema_id                   VARCHAR(25) NOT NULL REFERENCES ik_vendor.ik_onboarding_company(schema_id),
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by                  UUID NOT NULL REFERENCES ik_vendor.ik_global_users(id),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by                  UUID NOT NULL REFERENCES ik_vendor.ik_global_users(id),
+    CONSTRAINT ux_ik_role_permission_module UNIQUE (role_id, module_code)
+);
+CREATE INDEX ix_ik_role_permission_schema ON ik_vendor.ik_role_permission(schema_id);
 
 -- ---------------------------------------------------------------------
 -- 7. Keep global_users and each tenant's users table identical.
@@ -148,10 +223,10 @@ CREATE FUNCTION ik_vendor.sync_user_to_global() RETURNS trigger LANGUAGE plpgsql
 BEGIN
     IF pg_trigger_depth() > 1 THEN RETURN NULL; END IF;
     IF TG_OP = 'DELETE' THEN
-        DELETE FROM ik_vendor.global_users WHERE id = OLD.id;
+        DELETE FROM ik_vendor.ik_global_users WHERE id = OLD.id;
         RETURN NULL;
     END IF;
-    INSERT INTO ik_vendor.global_users
+    INSERT INTO ik_vendor.ik_global_users
            (id, company_id, name, email, password_hash, role, status, vendor_id, department, sap_employee_id,
             invite_token, invite_expires_at, rejection_reason, last_login_at, created_at, updated_at)
     VALUES (NEW.id, NEW.company_id, NEW.name, NEW.email, NEW.password_hash, NEW.role, NEW.status, NEW.vendor_id,
@@ -173,16 +248,16 @@ DECLARE
 BEGIN
     IF pg_trigger_depth() > 1 THEN RETURN NULL; END IF;
     IF TG_OP = 'DELETE' THEN
-        SELECT schema_id INTO tenant FROM ik_vendor.companies WHERE id = OLD.company_id;
+        SELECT schema_id INTO tenant FROM ik_vendor.ik_onboarding_company WHERE onboard_company_id = OLD.company_id;
         IF tenant IS NOT NULL THEN
-            EXECUTE format('DELETE FROM %I.users WHERE id = $1', tenant) USING OLD.id;
+            EXECUTE format('DELETE FROM %I.ik_users WHERE id = $1', tenant) USING OLD.id;
         END IF;
         RETURN NULL;
     END IF;
-    SELECT schema_id INTO tenant FROM ik_vendor.companies WHERE id = NEW.company_id;
+    SELECT schema_id INTO tenant FROM ik_vendor.ik_onboarding_company WHERE onboard_company_id = NEW.company_id;
     IF tenant IS NULL THEN RETURN NULL; END IF;   -- SUPER_ADMIN: lives in global_users only
     EXECUTE format($sql$
-        INSERT INTO %I.users
+        INSERT INTO %I.ik_users
                (id, company_id, name, email, password_hash, role, status, vendor_id, department, sap_employee_id,
                 invite_token, invite_expires_at, rejection_reason, last_login_at, created_at, updated_at)
         VALUES (($1).id, ($1).company_id, ($1).name, ($1).email, ($1).password_hash, ($1).role, ($1).status, ($1).vendor_id,
@@ -199,5 +274,5 @@ BEGIN
     RETURN NULL;
 END $$;
 
-CREATE TRIGGER trg_global_users_sync_tenant AFTER INSERT OR UPDATE OR DELETE ON ik_vendor.global_users
+CREATE TRIGGER trg_global_users_sync_tenant AFTER INSERT OR UPDATE OR DELETE ON ik_vendor.ik_global_users
     FOR EACH ROW EXECUTE FUNCTION ik_vendor.sync_user_to_tenant();

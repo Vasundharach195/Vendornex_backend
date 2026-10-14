@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /** Maps {@code purchase_request_lines}. */
 @Entity
-@Table(name = "purchase_request_lines")
+@Table(name = "ik_purchase_request_lines")
 @Getter
 @Setter
 @Builder

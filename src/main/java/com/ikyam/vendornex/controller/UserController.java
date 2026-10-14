@@ -20,6 +20,8 @@ import java.util.UUID;
  * accounts are created INVITED and the person activates via a one-time link.
  */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class UserController {
 
     private final UserService service;

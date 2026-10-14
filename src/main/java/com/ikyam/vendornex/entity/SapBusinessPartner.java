@@ -10,7 +10,7 @@ import java.time.Instant;
 
 /** Maps {@code sap_business_partners} (OCRD CardType=S mirror). */
 @Entity
-@Table(name = "sap_business_partners")
+@Table(name = "ik_sap_business_partners")
 @DynamicUpdate
 public class SapBusinessPartner {
 
@@ -31,9 +31,6 @@ public class SapBusinessPartner {
 
     @Column(length = 200)
     private String email;
-
-    @Column(name = "last_synced_at", nullable = false)
-    private Instant lastSyncedAt = Instant.now();
 
     protected SapBusinessPartner() {}
 

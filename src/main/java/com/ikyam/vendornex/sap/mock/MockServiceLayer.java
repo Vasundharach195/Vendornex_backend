@@ -390,7 +390,17 @@ public final class MockServiceLayer {
         return dbs.computeIfAbsent(name, n -> {
             Path f = storeDir.resolve(safe(n) + ".json");
             try {
-                if (Files.exists(f)) return (ObjectNode) Json.parse(Files.readString(f));
+                if (Files.exists(f)) {
+                    ObjectNode loaded = (ObjectNode) Json.parse(Files.readString(f));
+                    // store files written before the geo masters existed: add the missing collections
+                    ObjectNode fresh = MockSeedData.build();
+                    boolean added = false;
+                    for (String coll : new String[]{"Counties", "States", "BusinessPlaces"}) {
+                        if (!loaded.has(coll)) { loaded.set(coll, fresh.get(coll)); added = true; }
+                    }
+                    if (added) persist(n, loaded);
+                    return loaded;
+                }
             } catch (IOException e) {
                 log.warn("Could not read mock store {}, reseeding", f, e);
             }

@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.*;
 
 /** HTTP surface of Purchase Requests — business logic lives in {@link PurchaseRequestService}. */
 @RestController
+//@RequestMapping("vmsb1")
+
 @RequiredArgsConstructor
 public class PurchaseRequestController {
 

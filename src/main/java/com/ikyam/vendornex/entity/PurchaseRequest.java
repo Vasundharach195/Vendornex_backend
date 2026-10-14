@@ -15,7 +15,7 @@ import java.util.UUID;
  * {@code @DynamicUpdate} so status changes emit a narrow UPDATE.
  */
 @Entity
-@Table(name = "purchase_requests")
+@Table(name = "ik_purchase_requests")
 @DynamicUpdate
 @Getter
 @Setter

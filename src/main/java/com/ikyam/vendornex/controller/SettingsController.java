@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.*;
 
 /** Company Admin settings: PR source, approval chains, B1 posting defaults. */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class SettingsController {
 
     private final SettingsService service;

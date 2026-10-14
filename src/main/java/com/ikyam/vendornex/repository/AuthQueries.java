@@ -34,7 +34,7 @@ public class AuthQueries {
     public Row findUserForLogin(String email) {
         String sql = """
                 SELECT u.id, u.company_id, u.password_hash, u.status, u.role, u.vendor_id, c.is_active AS company_active, c.schema_id
-                  FROM global_users u LEFT JOIN companies c ON c.id = u.company_id
+                  FROM ik_global_users u LEFT JOIN ik_onboarding_company c ON c.onboard_company_id = u.company_id
                  WHERE lower(u.email) = ?""";
 
         Row u = one(sql, email);
@@ -44,13 +44,13 @@ public class AuthQueries {
     }
 
     public void updateLastLogin(UUID userId) {
-        jdbc.update("UPDATE global_users SET last_login_at = now() WHERE id = ?", userId);
+        jdbc.update("UPDATE ik_global_users SET last_login_at = now() WHERE id = ?", userId);
     }
 
     public Row findInviteInfo(String token) {
         String sql = """
-                SELECT u.name, u.email, u.role, u.invite_expires_at, c.name AS company_name, u.vendor_id, c.schema_id
-                  FROM global_users u LEFT JOIN companies c ON c.id = u.company_id
+                SELECT u.name, u.email, u.role, u.invite_expires_at, c.company_name AS company_name, u.vendor_id, c.schema_id
+                  FROM ik_global_users u LEFT JOIN ik_onboarding_company c ON c.onboard_company_id = u.company_id
                  WHERE u.invite_token = ? AND u.status = 'INVITED'""";
         Row u = one(sql, token);
         if (u == null) return null;
@@ -62,24 +62,24 @@ public class AuthQueries {
     }
 
     public Row findUserByInviteToken(String token) {
-        String sql = "SELECT id, company_id, email, invite_expires_at FROM global_users WHERE invite_token = ? AND status = 'INVITED'";
+        String sql = "SELECT id, company_id, email, invite_expires_at FROM ik_global_users WHERE invite_token = ? AND status = 'INVITED'";
         return one(sql, token);
     }
 
     public void acceptInvite(UUID userId, String passwordHash) {
         String sql = """
-                UPDATE global_users SET password_hash = ?, status = 'ACTIVE', invite_token = NULL, invite_expires_at = NULL, updated_at = now()
+                UPDATE ik_global_users SET password_hash = ?, status = 'ACTIVE', invite_token = NULL, invite_expires_at = NULL, updated_at = now()
                  WHERE id = ?""";
         jdbc.update(sql, passwordHash, userId);
     }
 
     public String getPasswordHash(UUID userId) {
-        String sql = "SELECT password_hash FROM global_users WHERE id = ?";
+        String sql = "SELECT password_hash FROM ik_global_users WHERE id = ?";
         return scalar(sql, String.class, userId);
     }
 
     public void updatePassword(UUID userId, String passwordHash) {
-        String sql = "UPDATE global_users SET password_hash = ?, updated_at = now() WHERE id = ?";
+        String sql = "UPDATE ik_global_users SET password_hash = ?, updated_at = now() WHERE id = ?";
         jdbc.update(sql, passwordHash, userId);
     }
 
@@ -88,8 +88,8 @@ public class AuthQueries {
         String sql = """
                 SELECT u.id, u.company_id, u.role, u.vendor_id, u.name, u.email, u.status,
                        c.is_active AS company_active, c.schema_id
-                  FROM global_users u
-                  LEFT JOIN companies c ON c.id = u.company_id
+                  FROM ik_global_users u
+                  LEFT JOIN ik_onboarding_company c ON c.onboard_company_id = u.company_id
                  WHERE u.id = ?""";
         Row u = one(sql, userId);
         if (u == null) return null;
@@ -102,11 +102,11 @@ public class AuthQueries {
     public Row findUserProfile(UUID userId) {
         String sql = """
                 SELECT u.id, u.name, u.email, u.role, u.department, u.company_id, u.vendor_id,
-                       c.name AS company_name, c.integration_mode, c.connection_status,
+                       c.company_name AS company_name, c.integration_mode, c.connection_status,
                        s.pr_mode, c.schema_id
-                  FROM global_users u
-                  LEFT JOIN companies c ON c.id = u.company_id
-                  LEFT JOIN company_settings s ON s.company_id = u.company_id
+                  FROM ik_global_users u
+                  LEFT JOIN ik_onboarding_company c ON c.onboard_company_id = u.company_id
+                  LEFT JOIN ik_company_settings s ON s.company_id = u.company_id
                  WHERE u.id = ?""";
         Row u = one(sql, userId);
         if (u == null) return null;
@@ -120,12 +120,12 @@ public class AuthQueries {
     }
 
     public void updateInviteToken(UUID userId, String token, Timestamp expiresAt) {
-        String sql = "UPDATE global_users SET invite_token = ?, invite_expires_at = ?, status = 'INVITED', updated_at = now() WHERE id = ?";
+        String sql = "UPDATE ik_global_users SET invite_token = ?, invite_expires_at = ?, status = 'INVITED', updated_at = now() WHERE id = ?";
         jdbc.update(sql, token, expiresAt, userId);
     }
 
     public void insertLoginActivity(UUID userId, UUID companyId, String email, String event, String ipAddress, String userAgent) {
-        String sql = "INSERT INTO login_activity(user_id, company_id, email, event, ip_address, user_agent) VALUES (?,?,?,?,?,?)";
+        String sql = "INSERT INTO ik_login_activity(user_id, company_id, email, event, ip_address, user_agent) VALUES (?,?,?,?,?,?)";
         jdbc.update(sql, userId, companyId, email, event, ipAddress, userAgent);
     }
 
@@ -133,14 +133,14 @@ public class AuthQueries {
     public Row findTokenTarget(UUID userId) {
         String sql = """
                 SELECT u.role, c.schema_id
-                  FROM global_users u LEFT JOIN companies c ON c.id = u.company_id
+                  FROM ik_global_users u LEFT JOIN ik_onboarding_company c ON c.onboard_company_id = u.company_id
                  WHERE u.id = ?""";
         return one(sql, userId);
     }
 
     /** Unqualified table name: resolves to the tenant's jwt_tokens inside a tenant context, else to the global one. */
     public void insertJwtRecord(UUID userId, String role, String tokenHash, Timestamp expiresAt) {
-        String sql = "INSERT INTO jwt_tokens(user_id, role, token_hash, expires_at) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO ik_jwt_tokens(user_id, role, token_hash, expires_at) VALUES (?, ?, ?, ?)";
         jdbc.update(sql, userId, role, tokenHash, expiresAt);
     }
 
@@ -150,6 +150,21 @@ public class AuthQueries {
      * Vendor name/card code/status and approval stages, read from the user's company schema.
      * A user without a company (SUPER_ADMIN) has none of these.
      */
+    /** The company's active SAP DBs for the login response, default first. Never the URL, user or password. */
+    public List<Row> sapConnections(String schemaId) {
+        if (schemaId == null) return new ArrayList<>();
+        return TenantContext.call(schemaId, () -> query("""
+                SELECT connection_id, connection_name, company_db_code, is_default, sequence_no
+                  FROM ik_sap_connection
+                 WHERE is_active
+                 ORDER BY is_default DESC, sequence_no NULLS LAST, connection_name"""));
+    }
+
+    /** True when {@code connectionId} is an active SAP DB of the current tenant (call inside the tenant context). */
+    public boolean activeConnectionExists(UUID connectionId) {
+        return !query("SELECT 1 AS found FROM ik_sap_connection WHERE connection_id = ?::uuid AND is_active", connectionId).isEmpty();
+    }
+
     private Row tenantParts(String schema, UUID userId, UUID vendorId) {
         if (schema == null) {
             return new Row().with("vendorName", null).with("vendorCardCode", null).with("vendorStatus", null)
@@ -157,8 +172,8 @@ public class AuthQueries {
         }
         String sql = """
                 SELECT v.legal_name AS vendor_name, v.sap_card_code AS vendor_card_code, v.status AS vendor_status,
-                       ARRAY(SELECT st.stage FROM user_approval_stages st WHERE st.user_id = ?::uuid ORDER BY st.stage) AS stages
-                  FROM (SELECT 1) one LEFT JOIN vendors v ON v.id = ?::uuid""";
+                       ARRAY(SELECT st.stage FROM ik_user_approval_stages st WHERE st.user_id = ?::uuid ORDER BY st.stage) AS stages
+                  FROM (SELECT 1) one LEFT JOIN ik_vendors v ON v.id = ?::uuid""";
         return TenantContext.call(schema, () -> one(sql, userId, vendorId));
     }
 

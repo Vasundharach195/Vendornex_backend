@@ -12,7 +12,7 @@ import java.time.Instant;
  * consumers (item picker's in-stock sum, Data Hub's per-warehouse breakdown) are correlated-
  * subquery/json_agg read-models and stay on JdbcTemplate — this exists for schema validation. */
 @Entity
-@Table(name = "sap_item_stock")
+@Table(name = "ik_sap_item_stock")
 public class SapItemStock {
 
     @EmbeddedId
@@ -26,9 +26,6 @@ public class SapItemStock {
 
     @Column(nullable = false, precision = 19, scale = 6)
     private BigDecimal ordered = BigDecimal.ZERO;
-
-    @Column(name = "last_synced_at", nullable = false)
-    private Instant lastSyncedAt = Instant.now();
 
     protected SapItemStock() {}
 

@@ -24,9 +24,9 @@ public class PurchaseRequestQueries {
             "p.justification, p.status, p.rejection_reason, p.sap_push_status, p.created_at, " +
             "(SELECT json_agg(json_build_object('id', l.id, 'itemCode', l.item_code, 'itemName', l.item_name, 'uom', l.uom, " +
             "'quantity', l.quantity, 'sourcedQty', l.sourced_qty, 'warehouseCode', l.warehouse_code) ORDER BY l.line_num) " +
-            " FROM purchase_request_lines l WHERE l.purchase_request_id = p.id) AS lines, " +
+            " FROM ik_purchase_request_lines l WHERE l.purchase_request_id = p.id) AS lines, " +
             ApprovalService.summarySql("PURCHASE_REQUEST", "p.id") + " AS approvals " +
-            "FROM purchase_requests p ";
+            "FROM ik_purchase_requests p ";
 
     private final JdbcTemplate jdbc;
 
@@ -46,13 +46,13 @@ public class PurchaseRequestQueries {
     /** RFQs and POs the PR's lines were pulled into. */
     public List<Row> sourcedInto(UUID prId) {
         return query("""
-                SELECT DISTINCT 'RFQ' AS kind, r.id, r.rfq_no AS number, r.status FROM rfq_line_sources s
-                  JOIN rfq_lines rl ON rl.id = s.rfq_line_id JOIN rfqs r ON r.id = rl.rfq_id
-                  JOIN purchase_request_lines l ON l.id = s.pr_line_id WHERE l.purchase_request_id = ?
+                SELECT DISTINCT 'RFQ' AS kind, r.id, r.rfq_no AS number, r.status FROM ik_rfq_line_sources s
+                  JOIN ik_rfq_lines rl ON rl.id = s.rfq_line_id JOIN ik_rfqs r ON r.id = rl.rfq_id
+                  JOIN ik_purchase_request_lines l ON l.id = s.pr_line_id WHERE l.purchase_request_id = ?
                 UNION
-                SELECT DISTINCT 'PO', po.id, COALESCE(po.sap_doc_num::text, 'pending'), po.status FROM purchase_order_lines pl
-                  JOIN purchase_orders po ON po.id = pl.purchase_order_id
-                  JOIN purchase_request_lines l ON l.id = pl.base_pr_line_id WHERE l.purchase_request_id = ?""", prId, prId);
+                SELECT DISTINCT 'PO', po.id, COALESCE(po.sap_doc_num::text, 'pending'), po.status FROM ik_purchase_order_lines pl
+                  JOIN ik_purchase_orders po ON po.id = pl.purchase_order_id
+                  JOIN ik_purchase_request_lines l ON l.id = pl.base_pr_line_id WHERE l.purchase_request_id = ?""", prId, prId);
     }
 
     /** Open (unsourced) quantity on lines of approved PRs. */
@@ -60,8 +60,8 @@ public class PurchaseRequestQueries {
         return query("""
                 SELECT l.id AS pr_line_id, p.id AS pr_id, p.pr_no, l.item_code, l.item_name, l.uom, l.warehouse_code, l.required_date,
                        l.quantity - l.sourced_qty AS open_qty, i.avg_price
-                  FROM purchase_request_lines l JOIN purchase_requests p ON p.id = l.purchase_request_id
-                  LEFT JOIN sap_items i ON i.company_id = p.company_id AND i.item_code = l.item_code
+                  FROM ik_purchase_request_lines l JOIN ik_purchase_requests p ON p.id = l.purchase_request_id
+                  LEFT JOIN ik_sap_items i ON i.company_id = p.company_id AND i.connection_id = ik_default_connection() AND i.item_code = l.item_code
                  WHERE p.company_id = ? AND p.id = ANY(?) AND p.status IN ('APPROVED','PARTIALLY_SOURCED') AND l.quantity > l.sourced_qty
                  ORDER BY p.pr_no, l.line_num""", companyId, prIds);
     }
@@ -70,11 +70,11 @@ public class PurchaseRequestQueries {
 
     /** {itemName, purchaseUom} of an active SAP purchase item, or null. */
     public Row findActiveItem(UUID companyId, String itemCode) {
-        return one("SELECT item_name, purchase_uom FROM sap_items WHERE company_id = ? AND item_code = ? AND is_active", companyId, itemCode);
+        return one("SELECT item_name, purchase_uom FROM ik_sap_items WHERE company_id = ? AND connection_id = ik_default_connection() AND item_code = ? AND is_active", companyId, itemCode);
     }
 
     public boolean activeWarehouseExists(UUID companyId, String warehouseCode) {
-        return one("SELECT 1 AS found FROM sap_warehouses WHERE company_id = ? AND warehouse_code = ? AND is_active", companyId, warehouseCode) != null;
+        return one("SELECT 1 AS found FROM ik_sap_warehouses WHERE company_id = ? AND connection_id = ik_default_connection() AND warehouse_code = ? AND is_active", companyId, warehouseCode) != null;
     }
 
     // ------------------------------------------------------------------ writes
@@ -82,10 +82,10 @@ public class PurchaseRequestQueries {
     /** PR status from its lines' sourced quantity: SOURCED when all lines are covered, PARTIALLY_SOURCED when some are. */
     public void recomputeSourcing(UUID prId) {
         jdbc.update("""
-                UPDATE purchase_requests p SET status = CASE WHEN q.all_done THEN 'SOURCED' WHEN q.any THEN 'PARTIALLY_SOURCED' ELSE p.status END,
+                UPDATE ik_purchase_requests p SET status = CASE WHEN q.all_done THEN 'SOURCED' WHEN q.any THEN 'PARTIALLY_SOURCED' ELSE p.status END,
                        updated_at = now()
                   FROM (SELECT bool_and(sourced_qty >= quantity) AS all_done, bool_or(sourced_qty > 0) AS any
-                          FROM purchase_request_lines WHERE purchase_request_id = ?) q
+                          FROM ik_purchase_request_lines WHERE purchase_request_id = ?) q
                  WHERE p.id = ? AND p.status IN ('APPROVED','PARTIALLY_SOURCED')""",
                 ps -> SqlBind.bind(ps.getConnection(), ps, new Object[]{prId, prId}));
     }

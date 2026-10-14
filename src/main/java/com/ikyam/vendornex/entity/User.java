@@ -18,7 +18,7 @@ import java.util.UUID;
  * user, which is exactly what Hibernate's default collection persistence does.
  */
 @Entity
-@Table(name = "users")
+@Table(name = "ik_users")
 public class User {
 
     @Id
@@ -73,7 +73,7 @@ public class User {
     private Instant updatedAt = Instant.now();
 
     @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "user_approval_stages", joinColumns = @JoinColumn(name = "user_id"))
+    @CollectionTable(name = "ik_user_approval_stages", joinColumns = @JoinColumn(name = "user_id"))
     @Column(name = "stage", length = 20)
     private Set<String> approvalStages = new LinkedHashSet<>();
 

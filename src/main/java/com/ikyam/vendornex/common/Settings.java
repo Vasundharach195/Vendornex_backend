@@ -12,7 +12,7 @@ public final class Settings {
     private Settings() {}
 
     public static Row of(UUID companyId) {
-        Row s = Db.one("SELECT * FROM company_settings WHERE company_id = ?", companyId);
+        Row s = Db.one("SELECT * FROM ik_company_settings WHERE company_id = ?", companyId);
         if (s == null) throw ApiException.notFound("Company settings");
         return s;
     }

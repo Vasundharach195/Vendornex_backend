@@ -84,11 +84,12 @@ public class ServiceLayerGateway implements SapB1Gateway {
         this.password = password;
         URI root = URI.create(this.baseUrl);
         int port = root.getPort() != -1 ? root.getPort() : "http".equalsIgnoreCase(root.getScheme()) ? 80 : 443;
+
+       // System.out.println(ReachableFirstResolver(port));
         // Apache HttpClient tries every address the host resolves to; java.net.http only tries the first one.
         PoolingHttpClientConnectionManagerBuilder cm = PoolingHttpClientConnectionManagerBuilder.create()
-                .setDnsResolver(new ReachableFirstResolver(port))
+              //  .setDnsResolver(new ReachableFirstResolver(port))
                 .setDefaultConnectionConfig(ConnectionConfig.custom().setConnectTimeout(Timeout.ofSeconds(15)).build());
-    
         if (!verifyTls) {
             cm.setSSLSocketFactory(SSLConnectionSocketFactoryBuilder.create()
                     .setSslContext(trustAllContext())
@@ -188,9 +189,10 @@ public class ServiceLayerGateway implements SapB1Gateway {
             body.put("UserName", username);
             body.put("Password", password);
             URI uri = URI.create(baseUrl + "/Login");
+            System.out.println(uri);
            try {
         	   ResponseEntity<String> res = send(HttpMethod.POST, uri, Map.of(), Json.write(body));
-          
+     
                if (res.getStatusCode().value() != 200) {
                    throw new SapException("Service Layer login failed: " + errorMessage(res.getBody()), res.getStatusCode().value(),
                            res.getStatusCode().value() >= 500, null);
@@ -231,7 +233,7 @@ public class ServiceLayerGateway implements SapB1Gateway {
         if (id == null) return;
         try {
             Db.exec("""
-                    INSERT INTO ik_vendor.b1_sessions(company_id, schema_id, sap_username, session_id, sap_db, expires_at)
+                    INSERT INTO ik_vendor.ik_b1_sessions(company_id, schema_id, sap_username, session_id, sap_db, expires_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT (company_id) DO UPDATE SET schema_id = EXCLUDED.schema_id, sap_username = EXCLUDED.sap_username,
                         session_id = EXCLUDED.session_id, sap_db = EXCLUDED.sap_db, expires_at = EXCLUDED.expires_at,
@@ -315,6 +317,7 @@ public class ServiceLayerGateway implements SapB1Gateway {
         for (int attempt = 0; attempt < 2; attempt++) {
             login();
             String url = pathAndQuery.startsWith("http") ? pathAndQuery : baseUrl + "/" + pathAndQuery;
+            
             Map<String, String> headers = new LinkedHashMap<>();
             headers.put("Cookie", cookieHeader);
             headers.put("Accept", "application/json");
@@ -348,11 +351,13 @@ public class ServiceLayerGateway implements SapB1Gateway {
             ResponseEntity<String> res = call("GET", next, null, Map.of("Prefer", "odata.maxpagesize=" + PAGE_SIZE));
             JsonNode j = Json.parse(res.getBody());
             j.path("value").forEach(out::add);
-            System.out.println("GET " + next + " -> value length = " + j.path("value").size() + " (total so far = " + out.size() + ")");
+            System.out.println("GET "  + j.path("value").size() + " (total so far = " + out.size() + ")");
+
             String link = j.hasNonNull("odata.nextLink") ? j.get("odata.nextLink").asText()
                     : j.hasNonNull("@odata.nextLink") ? j.get("@odata.nextLink").asText() : null;
             if (link == null || link.isBlank()) {
                 next = null;
+                
             } else if (link.startsWith("http")) {
                 next = link;
             } else {
@@ -410,6 +415,51 @@ public class ServiceLayerGateway implements SapB1Gateway {
                     !"tYES".equals(w.path("Inactive").asText())));
         }
         return out;
+    }
+
+    @Override
+    public List<Country> countries() {
+        List<Country> out = new ArrayList<>();
+        for (JsonNode n : getAll("Counties", Map.of())) {
+            String code = firstText(n, "Code", "CountryCode", "AbsId");
+            if (code == null) continue;
+            String name = firstText(n, "Name", "CountryName");
+            out.add(new Country(code, name == null ? code : name));
+        }
+        return out;
+    }
+
+    @Override
+    public List<State> states() {
+        List<State> out = new ArrayList<>();
+        for (JsonNode n : getAll("States", Map.of("$select", "Code,Name,Country"))) {
+            String code = firstText(n, "Code");
+            if (code == null) continue;
+            String name = firstText(n, "Name");
+            out.add(new State(code, name == null ? code : name, firstText(n, "Country")));
+        }
+        return out;
+    }
+
+    @Override
+    public List<Branch> branches() {
+        List<Branch> out = new ArrayList<>();
+        for (JsonNode n : getAll("BusinessPlaces", Map.of("$select", "BPLID,BPLName,Disabled"))) {
+            String id = firstText(n, "BPLID");
+            if (id == null) continue;
+            String name = firstText(n, "BPLName");
+            out.add(new Branch(id, name == null ? id : name, !"tYES".equals(n.path("Disabled").asText())));
+        }
+        return out;
+    }
+
+    /** First non-blank value among the given fields (numbers come back as text), else null. */
+    private static String firstText(JsonNode n, String... fields) {
+        for (String f : fields) {
+            JsonNode v = n.path(f);
+            if (!v.isMissingNode() && !v.isNull() && !v.asText().isBlank()) return v.asText().trim();
+        }
+        return null;
     }
 
     @Override
@@ -516,8 +566,8 @@ public class ServiceLayerGateway implements SapB1Gateway {
     }
 
     @Override
-    public List<Document> openPurchaseOrders(LocalDate since) {
-        String filter = "DocumentStatus eq 'bost_Open'" + (since == null ? "" : " and UpdateDate ge '" + since + "'");
+    public List<Document> openPurchaseOrders() {
+        String filter = "DocumentStatus eq 'bost_Open'";
         Map<String, String> q = Map.of(
                 "$select", "DocEntry,DocNum,DocDate,DocDueDate,CardCode,DocCurrency,Comments,DocumentStatus,DocumentLines",
                 "$filter", filter);
@@ -562,7 +612,12 @@ public class ServiceLayerGateway implements SapB1Gateway {
 
     @Override
     public Result createBusinessPartner(ObjectNode payload) {
+    	
+        System.out.println("-------before----");
+        System.out.println(payload);
         JsonNode r = post("BusinessPartners", payload);
+        System.out.println("-------aftere----");
+        System.out.println(payload);
         return new Result(null, null, r.path("CardCode").asText(null), r);
     }
 

@@ -12,7 +12,7 @@ import jakarta.persistence.Table;
  * validation and any future read/admin screen, not for the hot allocation path.
  */
 @Entity
-@Table(name = "doc_sequences")
+@Table(name = "ik_doc_sequences")
 public class DocSequence {
 
     @EmbeddedId

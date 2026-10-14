@@ -25,11 +25,16 @@ public interface SapB1Gateway {
     List<BusinessPartner> vendors();
     List<Employee> employees();
     List<TaxCode> taxCodes();
+    /** /Counties — the country master (code + name). */
+    List<Country> countries();
+    /** /States */
+    List<State> states();
+    /** /BusinessPlaces — branches. */
+    List<Branch> branches();
 
     // ------------------------------------------------------------- documents (read)
     List<Document> openPurchaseRequests();
-    /** Open purchase orders changed on/after {@code since} (null = all open). */
-    List<Document> openPurchaseOrders(LocalDate since);
+    List<Document> openPurchaseOrders();
     Document purchaseOrder(int docEntry);
     /** CardName of an existing BP, or null if the CardCode is free. */
     String businessPartnerName(String cardCode);
@@ -61,6 +66,12 @@ public interface SapB1Gateway {
     record Employee(int id, String name, String department, String email) {}
 
     record TaxCode(String code, String name, BigDecimal rate) {}
+
+    record Country(String code, String name) {}
+
+    record State(String code, String name, String countryCode) {}
+
+    record Branch(String id, String name, boolean active) {}
 
     record DocLine(int lineNum, String itemCode, String itemName, String uom, BigDecimal quantity,
                    BigDecimal openQty, BigDecimal price, String warehouseCode, String taxCode, LocalDate date) {}

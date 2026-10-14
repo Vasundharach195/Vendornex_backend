@@ -9,7 +9,7 @@ import java.util.UUID;
 
 /** Maps {@code vendor_documents}. Straightforward single-table CRUD — a real entity/repository. */
 @Entity
-@Table(name = "vendor_documents")
+@Table(name = "ik_vendor_documents")
 public class VendorDocument {
 
     @Id

@@ -7,6 +7,7 @@ import com.ikyam.vendornex.security.CurrentUser;
 import com.ikyam.vendornex.security.Role;
 import com.ikyam.vendornex.web.Roles;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -23,6 +24,8 @@ import java.util.UUID;
  * Trend uses monthly snapshots (vendor_score_snapshots) plus the live current figure.
  */
 @RestController
+//@RequestMapping("vmsb1")
+
 public class ScorecardController {
 
     private final ScorecardQueries scorecardQueries;

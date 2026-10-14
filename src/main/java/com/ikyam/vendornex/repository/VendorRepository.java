@@ -13,7 +13,7 @@ public interface VendorRepository extends JpaRepository<Vendor, UUID> {
 
     Optional<Vendor> findByIdAndCompanyId(UUID id, UUID companyId);
 
-    /** Mirrors {@code SELECT * FROM vendors WHERE id=? AND company_id=? FOR UPDATE} — the row lock
+    /** Mirrors {@code SELECT * FROM ik_vendors WHERE id=? AND company_id=? FOR UPDATE} — the row lock
      * {@code VendorController.submit} takes before mutating the vendor + starting the approval chain. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select v from Vendor v where v.id = :id and v.companyId = :companyId")

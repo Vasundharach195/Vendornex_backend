@@ -27,8 +27,8 @@ public class UserQueries {
 
     public List<Row> loginActivity(UUID companyId) {
         return jdbc.query("""
-                SELECT l.occurred_at, l.event, l.email, l.ip_address, u.name, u.role FROM login_activity l
-                  LEFT JOIN users u ON u.id = l.user_id
+                SELECT l.occurred_at, l.event, l.email, l.ip_address, u.name, u.role FROM ik_login_activity l
+                  LEFT JOIN ik_users u ON u.id = l.user_id
                  WHERE l.company_id = :company ORDER BY l.occurred_at DESC LIMIT 200""",
                 new MapSqlParameterSource("company", companyId), GenericRowMapper.INSTANCE);
     }
@@ -36,7 +36,7 @@ public class UserQueries {
     public List<Row> listRequesters(UUID companyId) {
         String sql = "SELECT u.id, u.name, u.email, u.department, u.status, u.sap_employee_id, u.rejection_reason, u.last_login_at, u.invite_token, " +
                 ApprovalService.summarySql("REQUESTER", "u.id") + " AS approvals " +
-                "FROM users u WHERE u.company_id = :company AND u.role = 'REQUESTER' ORDER BY u.name";
+                "FROM ik_users u WHERE u.company_id = :company AND u.role = 'REQUESTER' ORDER BY u.name";
         return jdbc.query(sql, new MapSqlParameterSource("company", companyId), GenericRowMapper.INSTANCE);
     }
 
@@ -44,14 +44,14 @@ public class UserQueries {
         List<Row> rows = jdbc.query("""
                 SELECT u.id, u.name, u.email, u.department, u.status, u.sap_employee_id, u.rejection_reason, u.created_at, u.invite_token,
                        e.full_name AS sap_employee_name
-                  FROM users u LEFT JOIN sap_employees e ON e.company_id = u.company_id AND e.employee_id = u.sap_employee_id
+                  FROM ik_users u LEFT JOIN ik_sap_employees e ON e.company_id = u.company_id AND e.connection_id = ik_default_connection() AND e.employee_id = u.sap_employee_id
                  WHERE u.id = :id AND u.company_id = :company AND u.role = 'REQUESTER'""",
                 new MapSqlParameterSource("id", id).addValue("company", companyId), GenericRowMapper.INSTANCE);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     public boolean employeeExists(UUID companyId, Integer employeeId) {
-        Boolean r = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM sap_employees WHERE company_id = :company AND employee_id = :emp)",
+        Boolean r = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM ik_sap_employees WHERE company_id = :company AND connection_id = ik_default_connection() AND employee_id = :emp)",
                 new MapSqlParameterSource("company", companyId).addValue("emp", employeeId), Boolean.class);
         return Boolean.TRUE.equals(r);
     }
